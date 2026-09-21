@@ -12,7 +12,7 @@ const SMOOTHING = 0.18;
 // neighbours overlapping by about a third on a typical phone lens.
 const YAW_STEP = 360 / SHOTS_PER_LEVEL;
 const YAW_TOLERANCE = 6;
-const YAW_RANGE = YAW_STEP; // the gauge spans one full step: just-shot at the end, target at the centre
+const YAW_RANGE = YAW_STEP; // gauge spans one step: just shot at the edge, target at the centre
 const ROTATION_SIGN = 1; // flip to -1 if "rotate right" drives the bubble away from the centre
 const DEG = Math.PI / 180;
 
@@ -44,7 +44,6 @@ let refShot = 0;            // the shot that re-zeroes it: 0, or the first one a
 let lastSpinShown = null;
 let lastSpinAligned = null;
 
-// The shutter ring now answers to both axes, so each one keeps its own verdict.
 let tiltAligned = false;
 let spinAligned = false;
 let lastReady = null;
@@ -83,10 +82,9 @@ const prompt = $("prompt");
 const captureBtn = $("capture-btn"), exportBtn = $("export-btn");
 const flash = $("flash"), perf = $("perf");
 
-// Photos go to IndexedDB as they are taken instead of piling up in RAM, so a run is
-// bounded by storage rather than memory, and a tab Safari kills mid-run can pick up
-// where it stopped. Without IndexedDB (some private modes), or when a write fails,
-// the photo simply stays in RAM as before.
+// Photos go to IndexedDB as they are taken, so a run is bounded by storage rather than
+// RAM, and a tab Safari kills mid-run can resume. Without IndexedDB (some private
+// modes), or when a write fails, the photo stays in RAM.
 const STORE = "photos";
 let db = null;
 let storedCount = 0;      // photos an earlier page left behind, from shot 1 with no gaps
@@ -117,8 +115,8 @@ const photoKey = (p) => p.level * SHOTS_PER_LEVEL + p.shot;
 function savePhoto(entry) {
   if (!db) return;
   idb("readwrite", (s) => s.put(entry.blob, photoKey(entry)))
-    .then(() => { entry.blob = null; }) // IndexedDB holds it now: let the RAM copy go
-    .catch(() => {});                   // stays in RAM, and export reads it from the entry
+    .then(() => { entry.blob = null; }) // stored: drop the RAM copy
+    .catch(() => {});                   // stays in RAM; export reads it from the entry
 }
 
 function restoreSession(n) {
@@ -127,8 +125,8 @@ function restoreSession(n) {
   }
   currentLevel = Math.floor(n / SHOTS_PER_LEVEL);
   currentShot = n % SHOTS_PER_LEVEL;
-  // The heading reference died with the old page - iOS alpha has no fixed zero across
-  // page loads - so the first shot after a resume becomes the new reference.
+  // The heading reference died with the old page (iOS alpha has no fixed zero across
+  // loads), so the first shot after a resume becomes the new one.
   refShot = currentShot;
 }
 
@@ -210,16 +208,15 @@ async function requestGyro() {
   }
 }
 
-// Ask for ONE edge, never a width+height pair. Chrome/Android resolves a pair in
-// sensor space and silently hands back a landscape crop - measured on a Xiaomi
-// (Android 16), {width:exact 1440, height:exact 1920} returns 1920x1440 with no
-// error, scene upright but the top and bottom gone. Constraining the short edge
-// alone returns a true portrait 3:4 track. iOS honours either form, and
-// applyConstraints can lower a resolution but never raise it.
+// Ask for ONE edge, never a width+height pair: Chrome/Android resolves a pair in sensor
+// space and silently returns a landscape crop. Measured on a Xiaomi (Android 16),
+// {width:exact 1440, height:exact 1920} came back 1920x1440 with the top and bottom
+// cut off; the short edge alone returns a true portrait 3:4 track. iOS honours either.
+// applyConstraints can lower a resolution but never raise it, so each rung is a fresh
+// getUserMedia.
 //
-// With a real still the preview is only a viewfinder, so ask for the lightest track
-// that still comes back 3:4. Without one the photo IS a preview frame, so ask for the
-// biggest the device will stream, working down from 12MP.
+// With a real still the preview is only a viewfinder, so take the lightest 3:4 track.
+// Without one the photo IS a preview frame, so take the biggest, down from 12MP.
 function shortEdgeLadder() {
   return USE_STILL ? [1080, 960, 1200, 1440, 1920] : [3024, 2448, 1920, 1440, 1080];
 }
@@ -333,23 +330,20 @@ function normDeg(d) {
   return ((d % 360) + 360) % 360;
 }
 
-// Shortest signed distance from b to a, in [-180, 180). Plain subtraction turns the
-// 359 -> 1 wrap into a 358 degree jump, which shows up as the bubble flying across
-// the track and as a 359 degree lerp in the smoothing.
+// Shortest signed distance from b to a, in [-180, 180). Plain subtraction would turn
+// the 359 -> 1 wrap into a 358 degree jump.
 function angleDiff(a, b) {
   return ((((a - b) % 360) + 540) % 360) - 180;
 }
 
-// Never read e.alpha directly. deviceorientation is Euler ZXY, and alpha/gamma go
-// degenerate at beta = +-90 - which, given rawPitch = e.beta - 90 below, is exactly
-// LEVEL_TARGETS' 0 degree level. Raw alpha would hand back a yaw that jumps around
-// on the middle level of the run. Rebuilding R = Rz(a)Rx(b)Ry(g) and taking the
-// azimuth of the rear camera axis (the device -z) steps around that: the noise in
-// alpha and gamma largely cancels on recomposition, and across +60..-60 the vector's
-// horizontal component never drops below cos 60, so the azimuth stays well behaved.
+// Never read e.alpha directly: deviceorientation is Euler ZXY, and alpha/gamma go
+// degenerate at beta = +-90 - exactly the 0 degree level, since rawPitch = beta - 90.
+// The azimuth of the rear camera axis (device -z) in R = Rz(a)Rx(b)Ry(g) stays stable
+// there: the alpha/gamma noise cancels out, and within +-60 the axis never gets close
+// to vertical.
 function cameraHeading(alpha, beta, gamma) {
   const cA = Math.cos(alpha * DEG), sA = Math.sin(alpha * DEG);
-  const sB = Math.sin(beta * DEG); // so o seno entra em m13/m23
+  const sB = Math.sin(beta * DEG);
   const cG = Math.cos(gamma * DEG), sG = Math.sin(gamma * DEG);
   // third column of R: the device +z axis in world coords (X east, Y north, Z up)
   const m13 = cA * sG + sA * sB * cG;
@@ -362,8 +356,7 @@ function disableTilt() {
   window.removeEventListener("deviceorientation", handleOrientation);
   tilt.classList.add("hidden");
   spin.classList.add("hidden");
-  // No sensor, no verdict to give: the shutter stays lit, and the dome carries on as a
-  // plain progress map minus the live cursor.
+  // No sensor: the shutter stays lit, and the dome becomes a progress map without cursor.
   tiltAligned = spinAligned = true;
   refreshReady();
   updateHUD();
@@ -387,8 +380,7 @@ function renderLoop(now) {
   }
 
   if (gyroActive && rawYaw !== null) {
-    // Same smoothing as the pitch, but stepped through angleDiff so it takes the
-    // short way around instead of unwinding the whole circle at the wrap.
+    // Same smoothing as the pitch, through angleDiff so it never unwinds at the wrap.
     displayYaw = (displayYaw === null)
         ? rawYaw
         : normDeg(displayYaw + angleDiff(rawYaw, displayYaw) * SMOOTHING);
@@ -441,9 +433,8 @@ function updateTilt(pitch) {
   }
 }
 
-// Both axes have to agree before the shutter goes green. Advisory only - the button
-// never blocks, same as before, because a drifting sensor must not be able to stop
-// the run.
+// The shutter goes green only when both axes agree. Advisory only: a drifting sensor
+// must never be able to block a shot.
 function refreshReady() {
   const ready = tiltAligned && spinAligned;
   if (ready === lastReady) return;
@@ -451,9 +442,8 @@ function refreshReady() {
   lastReady = ready;
 }
 
-// Measured from the start of the LEVEL, not from the previous shot: overshooting one
-// step then leaves the next target still on the ideal grid, instead of dragging the
-// level's whole pattern along with the error.
+// Measured from the start of the level, not the previous shot, so one overshoot
+// doesn't drag the rest of the level's targets along with it.
 function spinTarget() {
   return levelStartYaw === null ? null : levelStartYaw + ROTATION_SIGN * YAW_STEP * currentShot;
 }
@@ -461,8 +451,7 @@ function spinTarget() {
 function updateSpin() {
   const target = spinTarget();
   if (target === null || displayYaw === null || currentShot === refShot) {
-    // The reference shot (first of the level, or first after a resume) has nothing
-    // to rotate from yet.
+    // Reference shot: nothing to rotate from yet.
     if (!spinAligned) { spinAligned = true; refreshReady(); }
     lastSpinAligned = null;
     return;
@@ -490,10 +479,9 @@ function updateSpin() {
   }
 }
 
-// Coverage dome: LEVEL_TARGETS.length rings x SHOTS_PER_LEVEL sectors, seen from above.
-// The 40 cells only change when a photo lands, so they live on their own canvas and the
-// per-frame work is one blit plus the cursor - drawing 40 arcs at 60fps would be waste
-// in an app that puts its own frame rate on screen.
+// Coverage dome: one ring per level, one sector per shot, seen from above. The cells
+// only change when a photo lands, so they are drawn once to their own canvas and each
+// frame just blits it and adds the cursor.
 const domeBase = document.createElement("canvas");
 const domeBaseCtx = domeBase.getContext("2d");
 const domeCtx = dome.getContext("2d");
@@ -509,7 +497,7 @@ function initDome() {
   domeMid = px / 2;
   domeR = domeMid - 2 * domeScale; // room for the outer ring stroke
 
-  // Single-source the palette: these are the same tokens style.css paints with.
+  // Same colours as style.css, read from its custom properties.
   const cs = getComputedStyle(document.documentElement);
   domeInk.accent = cs.getPropertyValue("--accent").trim() || domeInk.accent;
   domeInk.ok = cs.getPropertyValue("--ok").trim() || domeInk.ok;
@@ -722,8 +710,8 @@ captureBtn.addEventListener("click", async () => {
   photos.push(entry);
   savePhoto(entry);
 
-  // The reference shot re-zeroes the heading, kept as where shot 0 of the level sits:
-  // drift then only accumulates within one level (~1 min) instead of the whole run.
+  // The reference shot re-zeroes the heading (stored as where shot 0 sits), so drift
+  // only builds up within one level (~1 min), never across the whole run.
   if (currentShot === refShot && rawYaw !== null) {
     levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * YAW_STEP * currentShot);
   }
@@ -753,11 +741,10 @@ function crc32(bytes) {
   return (c ^ 0xFFFFFFFF) >>> 0;
 }
 
-// A stored (uncompressed) zip, by hand. Stored, not deflated: JPEGs do not compress,
-// and deflating 40 of them in one pass was enough on its own to push mobile Safari
-// over its memory limit. Stored also means each entry is just a header in front of
-// the photo, so the photo Blobs go into new Blob() as parts and need not be copied
-// into one buffer the way JSZip did. The only read is the CRC, one photo at a time.
+// Stored (uncompressed) zip, by hand. Not deflated: JPEGs don't compress, and deflating
+// a 40-photo set in one pass was enough to push mobile Safari over its memory limit.
+// Each entry is just a header plus the photo, so the photo Blobs go into new Blob() as
+// parts instead of being copied into one buffer. The only read is each photo's CRC.
 async function buildZip(files) {
   const enc = new TextEncoder();
   const now = new Date();
