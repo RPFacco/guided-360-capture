@@ -19,7 +19,7 @@ will not work, and neither will a plain `http://192.168.x.x` LAN address.
 python -m http.server 8000
 ```
 
-On the same machine, `http://localhost:8000` is enough — `localhost` counts as secure.
+On the same machine, `http://localhost:8000` is enough, `localhost` counts as secure.
 To reach it from a phone you need an HTTPS tunnel, e.g.:
 
 ```bash
@@ -33,9 +33,9 @@ Two paths, picked per platform:
 | Platform | Preview | Photo |
 |---|---|---|
 | Android / desktop | light stream, ~1080 short edge | `ImageCapture.takePhoto()`, full sensor |
-| iOS | 1440×1920 | canvas grab of the preview frame |
+| iOS | up to 3024×4032 | canvas grab of the preview frame |
 
-On iOS `takePhoto()` reconfigures the capture session on every shot — the preview goes
+On iOS `takePhoto()` reconfigures the capture session on every shot, the preview goes
 black and each still allocates a sensor-sized buffer, which kills the tab after a
 handful of photos. So iOS draws the preview frame to a canvas instead, which means its
 preview has to stay large: there, the photo *is* the preview frame.
@@ -47,7 +47,7 @@ back to the canvas path for the rest of the run rather than producing a mixed se
 ## Memory
 
 Each photo is saved to IndexedDB as it is taken instead of being held in memory until
-export. The ZIP is stored, not deflated, because compressing 40 JPEGs in one pass was
+export. The ZIP is stored, not deflated, because compressing 60 JPEGs in one pass was
 enough on its own to push mobile Safari over its limit. If the export dies, lower
 `STILL_SETTINGS` in `app.js`.
 

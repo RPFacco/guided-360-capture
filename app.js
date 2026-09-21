@@ -20,7 +20,7 @@ const DOME_PX = 112;    // keep in sync with .dome in style.css
 
 const JPEG_QUALITY = 0.92;
 const SHOT_AR = 3 / 4;  // width/height, in portrait
-const LONG_EDGE = 1920; // canvas fallback only: cap the grab at 1440x1920
+const LONG_EDGE = 4032; // canvas path only: the photo is the whole preview frame, up to 12MP
 
 // Measured on a Xiaomi (Android 16): the still menu holds 2448x3264, 1920x2560 and
 // 1440x1920 at a true 3:4, plus a 2256x4000 16:9 that is the DEFAULT and crops 25%
@@ -218,9 +218,10 @@ async function requestGyro() {
 // applyConstraints can lower a resolution but never raise it.
 //
 // With a real still the preview is only a viewfinder, so ask for the lightest track
-// that still comes back 3:4. Without one the photo IS a preview frame, so keep it big.
+// that still comes back 3:4. Without one the photo IS a preview frame, so ask for the
+// biggest the device will stream, working down from 12MP.
 function shortEdgeLadder() {
-  return USE_STILL ? [1080, 960, 1200, 1440, 1920] : [1440, 1920, 1080];
+  return USE_STILL ? [1080, 960, 1200, 1440, 1920] : [3024, 2448, 1920, 1440, 1080];
 }
 
 // A track can answer the right size with the wrong shape - {height: exact 720} came
