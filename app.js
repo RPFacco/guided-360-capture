@@ -40,7 +40,7 @@ let running = false;
 let rawYaw = null;
 let displayYaw = null;
 let levelStartYaw = null;   // heading where shot 0 of the current level sits
-let refShot = 0;            // the shot that re-zeroes it: 0, or the first one after a resume
+let refShot = 0;            // > 0: heading lost at this shot
 let lastSpinShown = null;
 let lastSpinAligned = null;
 
@@ -126,7 +126,7 @@ function restoreSession(n) {
   currentLevel = Math.floor(n / SHOTS_PER_LEVEL);
   currentShot = n % SHOTS_PER_LEVEL;
   // The heading reference died with the old page (iOS alpha has no fixed zero across
-  // loads), so the first shot after a resume becomes the new one.
+  // loads), so the first tap after a resume recalibrates it.
   refShot = currentShot;
 }
 
@@ -192,6 +192,7 @@ async function begin(resume) {
   capture.classList.replace("hidden", "active");
 
   running = true;
+  keepAwake();
   initDome();
   updateHUD();
   updatePerf();
@@ -289,10 +290,24 @@ function startFrameLoop() {
   video.requestVideoFrameCallback(tick);
 }
 
+// The browser drops the lock when the page is hidden.
+function keepAwake() {
+  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+}
+
 // iOS pauses the element under memory pressure and after a backgrounding.
 video.addEventListener("pause", () => { if (running) video.play().catch(() => {}); });
 document.addEventListener("visibilitychange", () => {
-  if (!document.hidden && running) video.play().catch(() => {});
+  if (!running) return;
+  if (document.hidden) {
+    // Relative yaw may restart while hidden, same as a reload.
+    refShot = currentShot;
+    levelStartYaw = rawYaw = displayYaw = null;
+    updateHUD();
+    return;
+  }
+  video.play().catch(() => {});
+  keepAwake();
 });
 
 // Resolves true as soon as a freshly decoded frame lands, false on timeout.
@@ -551,7 +566,9 @@ function drawDome() {
 
   // (75 - pitch) / 150 lands each LEVEL_TARGETS entry on the CENTRE of its ring
   // (+60 -> 0.1, 0 -> 0.5, -60 -> 0.9) rather than on the seam between two rings.
-  const live = gyroActive && displayPitch !== null && displayYaw !== null && levelStartYaw !== null;
+  // Heading lost: no cursor until the recalibration tap.
+  const lost = refShot > 0 && currentShot === refShot;
+  const live = gyroActive && !lost && displayPitch !== null && displayYaw !== null && levelStartYaw !== null;
   let x = 0, y = 0, key = "";
   if (live) {
     const r = Math.max(0, Math.min(1, (75 - displayPitch) / 150)) * domeR;
@@ -599,8 +616,8 @@ function updateHUD() {
   shotCounter.textContent = `Shot ${currentShot + 1} of ${SHOTS_PER_LEVEL}`;
   prompt.textContent = currentShot === 0
       ? (gyroActive ? `Tilt the phone to ${tiltText}` : `Aim ~${tiltText} (no sensor)`)
-      : currentShot === refShot
-      ? `Rotate ~${YAW_STEP}° past your last shot`
+      : currentShot === refShot && gyroActive
+      ? "Aim where your last photo was, then tap to recalibrate"
       : (gyroActive ? "Rotate right until the bar centres" : `Rotate ~${YAW_STEP}° right (no sensor)`);
 
   spin.classList.toggle("hidden", !gyroActive || currentShot === refShot);
@@ -684,6 +701,15 @@ async function capturePhoto() {
 
 captureBtn.addEventListener("click", async () => {
   if (busy || currentLevel >= LEVEL_TARGETS.length) return;
+
+  // Recalibration: aimed back at the last photo, so no photo is taken.
+  if (refShot > 0 && currentShot === refShot && gyroActive && rawYaw !== null) {
+    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * YAW_STEP * (currentShot - 1));
+    refShot = 0;
+    updateHUD();
+    return;
+  }
+
   busy = true;
 
   flash.classList.add("animate");
