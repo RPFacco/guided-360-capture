@@ -1,18 +1,18 @@
 "use strict";
 
-const LEVEL_TARGETS = [60, 30, 0, -30, -60];
-const SHOTS_PER_LEVEL = 12;
-const TOTAL_SHOTS = LEVEL_TARGETS.length * SHOTS_PER_LEVEL;
+const LEVEL_TARGETS = [90, 45, 0, -45, -90];
+const LEVEL_SHOTS = [1, 10, 16, 10, 1];
+const shotsBefore = (level) => LEVEL_SHOTS.slice(0, level).reduce((a, b) => a + b, 0);
+const TOTAL_SHOTS = shotsBefore(LEVEL_SHOTS.length);
 
 const TOLERANCE = 5;
 const RANGE = 25;
 const SMOOTHING = 0.18;
 
-// Rotation between shots. 6 degrees of slop on a 30 degree step still leaves the
-// neighbours overlapping by about a third on a typical phone lens.
-const YAW_STEP = 360 / SHOTS_PER_LEVEL;
+// Rotation between shots on the current level. 6 degrees of slop still leaves the
+// neighbours overlapping by over a third on a typical phone lens.
+const yawStep = () => 360 / LEVEL_SHOTS[currentLevel];
 const YAW_TOLERANCE = 6;
-const YAW_RANGE = YAW_STEP; // gauge spans one step: just shot at the edge, target at the centre
 const ROTATION_SIGN = 1; // flip to -1 if "rotate right" drives the bubble away from the centre
 const DEG = Math.PI / 180;
 
@@ -110,7 +110,7 @@ function idb(mode, op) {
   });
 }
 
-const photoKey = (p) => p.level * SHOTS_PER_LEVEL + p.shot;
+const photoKey = (p) => shotsBefore(p.level) + p.shot;
 
 function savePhoto(entry) {
   if (!db) return;
@@ -121,10 +121,9 @@ function savePhoto(entry) {
 
 function restoreSession(n) {
   for (let i = 0; i < n; i++) {
-    photos.push({ level: Math.floor(i / SHOTS_PER_LEVEL), shot: i % SHOTS_PER_LEVEL, blob: null });
+    photos.push({ level: currentLevel, shot: currentShot, blob: null });
+    if (++currentShot === LEVEL_SHOTS[currentLevel]) { currentShot = 0; currentLevel++; }
   }
-  currentLevel = Math.floor(n / SHOTS_PER_LEVEL);
-  currentShot = n % SHOTS_PER_LEVEL;
   // The heading reference died with the old page (iOS alpha has no fixed zero across
   // loads), so the first tap after a resume recalibrates it.
   refShot = currentShot;
@@ -352,10 +351,10 @@ function angleDiff(a, b) {
 }
 
 // Never read e.alpha directly: deviceorientation is Euler ZXY, and alpha/gamma go
-// degenerate at beta = +-90 - exactly the 0 degree level, since rawPitch = beta - 90.
+// degenerate at beta = +-90 - exactly the 0 degree level, with the phone upright.
 // The azimuth of the rear camera axis (device -z) in R = Rz(a)Rx(b)Ry(g) stays stable
-// there: the alpha/gamma noise cancels out, and within +-60 the axis never gets close
-// to vertical.
+// there: the alpha/gamma noise cancels out. Only the single-shot +-90 levels point the
+// axis vertical, where it has no azimuth, and they never re-zero the heading.
 function cameraHeading(alpha, beta, gamma) {
   const cA = Math.cos(alpha * DEG), sA = Math.sin(alpha * DEG);
   const sB = Math.sin(beta * DEG);
@@ -380,8 +379,8 @@ function disableTilt() {
 function handleOrientation(e) {
   if (e.beta == null) return;
   gotOrientation = true;
-  // Flip to (90 - e.beta) if pitch is inverted on your device.
-  rawPitch = e.beta - 90;
+  // Elevation of the camera axis. Plain beta - 90 wraps to -270 past the zenith.
+  rawPitch = Math.asin(-Math.cos(e.beta * DEG) * Math.cos((e.gamma || 0) * DEG)) / DEG;
   if (e.alpha != null && e.gamma != null) rawYaw = cameraHeading(e.alpha, e.beta, e.gamma);
 }
 
@@ -399,7 +398,7 @@ function renderLoop(now) {
     displayYaw = (displayYaw === null)
         ? rawYaw
         : normDeg(displayYaw + angleDiff(rawYaw, displayYaw) * SMOOTHING);
-    if (levelStartYaw === null) levelStartYaw = normDeg(displayYaw - ROTATION_SIGN * YAW_STEP * currentShot);
+    if (levelStartYaw === null) levelStartYaw = normDeg(displayYaw - ROTATION_SIGN * yawStep() * currentShot);
     updateSpin();
   }
   drawDome();
@@ -460,7 +459,7 @@ function refreshReady() {
 // Measured from the start of the level, not the previous shot, so one overshoot
 // doesn't drag the rest of the level's targets along with it.
 function spinTarget() {
-  return levelStartYaw === null ? null : levelStartYaw + ROTATION_SIGN * YAW_STEP * currentShot;
+  return levelStartYaw === null ? null : levelStartYaw + ROTATION_SIGN * yawStep() * currentShot;
 }
 
 function updateSpin() {
@@ -475,8 +474,9 @@ function updateSpin() {
   const diff = angleDiff(displayYaw, target);
 
   const half = 97;
-  const clamped = Math.max(-YAW_RANGE, Math.min(YAW_RANGE, diff));
-  const offset = (clamped / YAW_RANGE) * half;
+  const range = yawStep(); // gauge spans one step: just shot at the edge, target at the centre
+  const clamped = Math.max(-range, Math.min(range, diff));
+  const offset = (clamped / range) * half;
   spinBubble.style.transform = `translate(calc(-50% + ${offset.toFixed(1)}px), -50%)`;
 
   const deg = Math.round(-diff * ROTATION_SIGN); // degrees still to go, counting down to 0
@@ -521,13 +521,15 @@ function initDome() {
 }
 
 function cellPath(ctx, level, sector) {
-  const step = 360 / SHOTS_PER_LEVEL;
+  const step = 360 / LEVEL_SHOTS[level];
   const r0 = domeR * level / LEVEL_TARGETS.length;
   const r1 = domeR * (level + 1) / LEVEL_TARGETS.length;
   const a0 = (sector * step - 90 - step / 2) * DEG; // sector 0 centred at the top
   const a1 = a0 + step * DEG;
   ctx.beginPath();
   ctx.arc(domeMid, domeMid, r1, a0, a1);
+  // A single-shot level is a whole ring: no radial seam between its edges.
+  if (step === 360) ctx.moveTo(domeMid + r0 * Math.cos(a1), domeMid + r0 * Math.sin(a1));
   ctx.arc(domeMid, domeMid, r0, a1, a0, true);
   ctx.closePath();
 }
@@ -538,10 +540,10 @@ function drawDomeBase() {
   ctx.clearRect(0, 0, domeBase.width, domeBase.height);
 
   // Capture is sequential, so the filled cells are always the first `done` in order.
-  const done = currentLevel * SHOTS_PER_LEVEL + currentShot;
+  const done = shotsBefore(currentLevel) + currentShot;
   for (let level = 0; level < LEVEL_TARGETS.length; level++) {
-    for (let sector = 0; sector < SHOTS_PER_LEVEL; sector++) {
-      const idx = level * SHOTS_PER_LEVEL + sector;
+    for (let sector = 0; sector < LEVEL_SHOTS[level]; sector++) {
+      const idx = shotsBefore(level) + sector;
       const isTarget = idx === done;
       cellPath(ctx, level, sector);
       if (idx < done) {
@@ -564,14 +566,14 @@ function drawDomeBase() {
 function drawDome() {
   if (!domeR) return;
 
-  // (75 - pitch) / 150 lands each LEVEL_TARGETS entry on the CENTRE of its ring
-  // (+60 -> 0.1, 0 -> 0.5, -60 -> 0.9) rather than on the seam between two rings.
+  // (112.5 - pitch) / 225 lands each LEVEL_TARGETS entry on the CENTRE of its ring
+  // (+90 -> 0.1, 0 -> 0.5, -90 -> 0.9) rather than on the seam between two rings.
   // Heading lost: no cursor until the recalibration tap.
   const lost = refShot > 0 && currentShot === refShot;
   const live = gyroActive && !lost && displayPitch !== null && displayYaw !== null && levelStartYaw !== null;
   let x = 0, y = 0, key = "";
   if (live) {
-    const r = Math.max(0, Math.min(1, (75 - displayPitch) / 150)) * domeR;
+    const r = Math.max(0, Math.min(1, (112.5 - displayPitch) / 225)) * domeR;
     const a = (ROTATION_SIGN * angleDiff(displayYaw, levelStartYaw) - 90) * DEG;
     x = domeMid + r * Math.cos(a);
     y = domeMid + r * Math.sin(a);
@@ -595,7 +597,7 @@ function drawDome() {
 }
 
 function updateHUD() {
-  const done = currentLevel * SHOTS_PER_LEVEL + currentShot;
+  const done = shotsBefore(currentLevel) + currentShot;
   progressFill.style.width = (done / TOTAL_SHOTS) * 100 + "%";
   drawDomeBase();
 
@@ -613,12 +615,12 @@ function updateHUD() {
   const t = LEVEL_TARGETS[currentLevel];
   const tiltText = `${t > 0 ? "+" : ""}${t}°`;
   levelLabel.textContent = `Level ${currentLevel + 1} of ${LEVEL_TARGETS.length} (${tiltText})`;
-  shotCounter.textContent = `Shot ${currentShot + 1} of ${SHOTS_PER_LEVEL}`;
+  shotCounter.textContent = `Shot ${currentShot + 1} of ${LEVEL_SHOTS[currentLevel]}`;
   prompt.textContent = currentShot === 0
       ? (gyroActive ? `Tilt the phone to ${tiltText}` : `Aim ~${tiltText} (no sensor)`)
       : currentShot === refShot && gyroActive
       ? "Aim where your last photo was, then tap to recalibrate"
-      : (gyroActive ? "Rotate right until the bar centres" : `Rotate ~${YAW_STEP}° right (no sensor)`);
+      : (gyroActive ? "Rotate right until the bar centres" : `Rotate ~${yawStep()}° right (no sensor)`);
 
   spin.classList.toggle("hidden", !gyroActive || currentShot === refShot);
 }
@@ -704,7 +706,7 @@ captureBtn.addEventListener("click", async () => {
 
   // Recalibration: aimed back at the last photo, so no photo is taken.
   if (refShot > 0 && currentShot === refShot && gyroActive && rawYaw !== null) {
-    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * YAW_STEP * (currentShot - 1));
+    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * yawStep() * (currentShot - 1));
     refShot = 0;
     updateHUD();
     return;
@@ -737,13 +739,14 @@ captureBtn.addEventListener("click", async () => {
   savePhoto(entry);
 
   // The reference shot re-zeroes the heading (stored as where shot 0 sits), so drift
-  // only builds up within one level (~1 min), never across the whole run.
-  if (currentShot === refShot && rawYaw !== null) {
-    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * YAW_STEP * currentShot);
+  // only builds up within one level (~1 min), never across the whole run. Not at the
+  // poles: a vertical camera axis has no heading.
+  if (currentShot === refShot && rawYaw !== null && LEVEL_SHOTS[currentLevel] > 1) {
+    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * yawStep() * currentShot);
   }
 
   currentShot++;
-  if (currentShot >= SHOTS_PER_LEVEL) {
+  if (currentShot >= LEVEL_SHOTS[currentLevel]) {
     currentShot = 0;
     currentLevel++;
     refShot = 0;
