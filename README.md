@@ -52,12 +52,21 @@ back to the canvas path for the rest of the run rather than producing a mixed se
 Each photo is saved to IndexedDB as it is taken instead of being held in memory until
 export. The ZIP is stored, not deflated, because compressing 38 JPEGs in one pass was
 enough on its own to push mobile Safari over its limit. If the export dies, lower
-`STILL_SETTINGS` in `app.js`.
+`STILL_SETTINGS` in `camera.js`.
 
 ## Files
 
 ```
-index.html   markup
-style.css    styling, including the 3:4 preview frame
-app.js       everything else
+index.html         markup
+style.css          styling, including the 3:4 preview frame
+js/app.js          start-up and capture flow
+js/session.js      shot layout, progress, heading reference
+js/orientation.js  gyroscope and rotation math
+js/camera.js       preview stream and photo capture
+js/autoshot.js     automatic shutter
+js/hud.js          gauges and on-screen text
+js/dome.js         coverage dome
+js/targets.js      dots pinned to the scene
+js/storage.js      IndexedDB
+js/zip.js          ZIP export
 ```

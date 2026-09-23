@@ -203,7 +203,7 @@ html, body {
   0% { opacity: 0.85; }
   100% { opacity: 0; }
 }
-/* Coverage dome, mirroring .tilt on the opposite edge. Size must match DOME_PX in app.js. */
+/* Coverage dome, mirroring .tilt on the opposite edge. Size must match DOME_PX in dome.js. */
 .dome {
   position: absolute;
   top: 50%;
@@ -216,7 +216,7 @@ html, body {
 }
 
 /* Rotation gauge: the tilt bubble on its side. Same 220px track, so the bubble
-   travel (half = 97 in app.js) matches the tilt's. */
+   travel (half = 97 in hud.js) matches the tilt's. */
 .spin {
   display: flex;
   flex-direction: column;
