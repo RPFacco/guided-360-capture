@@ -9,6 +9,10 @@ const TOLERANCE = 5;
 const RANGE = 25;
 const SMOOTHING = 0.18;
 
+// Auto shot: aimed at the target and held still this long, the photo takes itself.
+const HOLD_MS = 800;
+const STILL_DEG = 3; // the aim may wander this far during the hold: hand tremor, not a pan
+
 // Rotation between shots on the current level. 6 degrees of slop still leaves the
 // neighbours overlapping by over a third on a typical phone lens.
 const yawStep = () => 360 / LEVEL_SHOTS[currentLevel];
@@ -43,6 +47,8 @@ let levelStartYaw = null;   // heading where shot 0 of the current level sits
 let refShot = 0;            // > 0: heading lost at this shot
 const headingLost = () => refShot > 0 && currentShot === refShot;
 let rawRotation = null;     // device rotation matrix from the latest orientation event
+let holdSince = null, holdProgress = 0; // auto shot: when the hold started, how far along (0..1)
+let holdAnchor = null;      // rotation when the hold started
 let lastSpinShown = null;
 let lastSpinAligned = null;
 
@@ -392,7 +398,7 @@ function disableTilt() {
 function handleOrientation(e) {
   if (e.beta == null) return;
   gotOrientation = true;
-  // Elevation of the camera axis. Plain beta - 90 wraps to -270 past the zenith.
+  // Elevation of the camera axis. Beta alone won't do: it wraps from +180 to -180 at the zenith.
   rawPitch = Math.asin(-Math.cos(e.beta * DEG) * Math.cos((e.gamma || 0) * DEG)) / DEG;
   if (e.alpha == null || e.gamma == null) return;
   rawRotation = deviceRotation(e.alpha, e.beta, e.gamma);
@@ -416,6 +422,7 @@ function renderLoop(now) {
     if (levelStartYaw === null) levelStartYaw = normDeg(displayYaw - ROTATION_SIGN * yawStep() * currentShot);
     updateSpin();
   }
+  updateAutoShot(now);
   drawDome();
   if (!hasVFC) drawTargets();
 
@@ -651,9 +658,9 @@ function targetDot(x, y, r, color) {
   targetsCtx.stroke();
 }
 
-function targetRing(x, y, r, color) {
+function targetRing(x, y, r, color, sweep = 1) {
   targetsCtx.beginPath();
-  targetsCtx.arc(x, y, r, 0, Math.PI * 2);
+  targetsCtx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + sweep * Math.PI * 2);
   targetsCtx.lineWidth = 4;
   targetsCtx.strokeStyle = "rgba(0,0,0,0.55)";
   targetsCtx.stroke();
@@ -683,6 +690,7 @@ function drawTargets() {
     }
   }
   targetRing(cx, cy, 6, "#fff"); // aim point
+  if (holdProgress > 0) targetRing(cx, cy, 20, domeInk.ok, holdProgress);
 }
 
 function updateHUD() {
@@ -706,10 +714,12 @@ function updateHUD() {
   levelLabel.textContent = `Level ${currentLevel + 1} of ${LEVEL_TARGETS.length} (${tiltText})`;
   shotCounter.textContent = `Shot ${currentShot + 1} of ${LEVEL_SHOTS[currentLevel]}`;
   prompt.textContent = currentShot === 0
-      ? (gyroActive ? `Tilt the phone to ${tiltText}` : `Aim ~${tiltText} (no sensor)`)
+      ? (!gyroActive ? `Aim ~${tiltText} (no sensor)`
+          : LEVEL_SHOTS[currentLevel] > 1 ? `Tilt to ${tiltText} and aim at the green ring`
+          : `Tilt the phone to ${tiltText}`)
       : currentShot === refShot && gyroActive
       ? "Aim where your last photo was, then tap to recalibrate"
-      : (gyroActive ? "Rotate right until the bar centres" : `Rotate ~${yawStep()}° right (no sensor)`);
+      : (gyroActive ? "Rotate right to the green ring" : `Rotate ~${yawStep()}° right (no sensor)`);
 
   spin.classList.toggle("hidden", !gyroActive || currentShot === refShot);
 }
@@ -790,7 +800,46 @@ async function capturePhoto() {
   return blob;
 }
 
-captureBtn.addEventListener("click", async () => {
+// Not spinAligned: that one is waived on reference shots, and the auto shot still wants
+// them on their dot. The poles have no heading, so only their tilt counts.
+function aimedAtTarget() {
+  if (!tiltAligned) return false;
+  if (LEVEL_SHOTS[currentLevel] === 1) return true;
+  const target = spinTarget();
+  return target !== null && displayYaw !== null && Math.abs(angleDiff(displayYaw, target)) <= YAW_TOLERANCE;
+}
+
+// Angle between two rotations: cos = (trace(A^T B) - 1) / 2.
+function rotationAngle(a, b) {
+  let dot = 0;
+  for (let k = 0; k < 9; k++) dot += a[k] * b[k];
+  return Math.acos(Math.max(-1, Math.min(1, (dot - 1) / 2))) / DEG;
+}
+
+// Fills the ring around the aim point while aimed; it restarts when the aim drifts past
+// STILL_DEG from where the hold began. Hand tremor is fast but goes nowhere, so the hold
+// is judged by drift, not speed.
+function updateAutoShot(now) {
+  const armed = gyroActive && !busy && !headingLost() && currentLevel < LEVEL_TARGETS.length
+      && rawRotation !== null && aimedAtTarget();
+  if (!armed) {
+    holdSince = null;
+    holdProgress = 0;
+    return;
+  }
+  if (holdSince === null || rotationAngle(holdAnchor, rawRotation) > STILL_DEG) {
+    holdSince = now;
+    holdAnchor = rawRotation;
+  }
+  holdProgress = Math.min(1, (now - holdSince) / HOLD_MS);
+  if (holdProgress < 1) return;
+  holdSince = null;
+  holdProgress = 0;
+  if (navigator.vibrate) navigator.vibrate(30);
+  shoot();
+}
+
+captureBtn.addEventListener("click", () => {
   if (busy || currentLevel >= LEVEL_TARGETS.length) return;
 
   // Recalibration: aimed back at the last photo, so no photo is taken.
@@ -800,7 +849,10 @@ captureBtn.addEventListener("click", async () => {
     updateHUD();
     return;
   }
+  shoot();
+});
 
+async function shoot() {
   busy = true;
   const tapYaw = rawYaw; // the capture can take a second, and the phone moves on
 
@@ -843,7 +895,7 @@ captureBtn.addEventListener("click", async () => {
     refShot = 0;
   }
   updateHUD();
-});
+}
 
 const CRC_TABLE = (() => {
   const t = new Uint32Array(256);
