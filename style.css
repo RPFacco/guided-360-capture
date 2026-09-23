@@ -61,7 +61,8 @@ html, body {
 
 #capture { background: #000; }
 
-#video {
+/* The targets canvas covers exactly the preview box: its centre is the projection centre. */
+#video, #targets {
   position: absolute;
   top: 50%;
   left: 50%;
@@ -71,9 +72,12 @@ html, body {
   max-height: 100%;
   max-width: calc(100vh * 3 / 4);
   aspect-ratio: 3 / 4;
+}
+#video {
   object-fit: cover;
   background: #000;
 }
+#targets { pointer-events: none; }
 
 .hud-top {
   position: absolute;

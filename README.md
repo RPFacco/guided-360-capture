@@ -3,11 +3,10 @@
 A single-page web app that walks you through shooting a 38-photo turntable set with a
 phone: **5 tilt levels** (+90°, +45°, 0°, -45°, -90°) with **1, 10, 16, 10, 1 shots**,
 evenly spaced around each level. An on-screen bubble level uses the gyroscope to tell you when the phone
-is at the right pitch. At the end it packs every shot into a single `.zip`.
+is at the right pitch. Dots pinned to the scene mark where each shot goes: aim the centre
+ring at the next one. At the end it packs every shot into a single `.zip`.
 
 All photos come out **3:4 portrait**.
-
-Three static files.
 
 ## Running it
 

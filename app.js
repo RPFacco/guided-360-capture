@@ -41,6 +41,8 @@ let rawYaw = null;
 let displayYaw = null;
 let levelStartYaw = null;   // heading where shot 0 of the current level sits
 let refShot = 0;            // > 0: heading lost at this shot
+const headingLost = () => refShot > 0 && currentShot === refShot;
+let rawRotation = null;     // device rotation matrix from the latest orientation event
 let lastSpinShown = null;
 let lastSpinAligned = null;
 
@@ -193,6 +195,7 @@ async function begin(resume) {
   running = true;
   keepAwake();
   initDome();
+  initTargets();
   updateHUD();
   updatePerf();
   requestAnimationFrame(renderLoop);
@@ -276,7 +279,8 @@ async function startCamera() {
 
 // Re-attaching srcObject cancels any pending requestVideoFrameCallback, so the loop
 // has to be restartable. The generation token keeps a resurrected chain from running
-// alongside an old one that turned out to be alive.
+// alongside an old one that turned out to be alive. The targets are drawn here, in
+// step with the frame they belong to.
 function startFrameLoop() {
   if (!hasVFC) return;
   const gen = ++frameLoopGen;
@@ -284,7 +288,8 @@ function startFrameLoop() {
     if (gen !== frameLoopGen) return;
     camFrames++;
     frameSeq++;
-    video.requestVideoFrameCallback(tick);
+    video.requestVideoFrameCallback(tick); // re-armed first: a drawing error must not stop the loop
+    drawTargets();
   };
   video.requestVideoFrameCallback(tick);
 }
@@ -299,9 +304,10 @@ video.addEventListener("pause", () => { if (running) video.play().catch(() => {}
 document.addEventListener("visibilitychange", () => {
   if (!running) return;
   if (document.hidden) {
-    // Relative yaw may restart while hidden, same as a reload.
-    refShot = currentShot;
-    levelStartYaw = rawYaw = displayYaw = null;
+    // Relative yaw may restart while hidden, same as a reload. A capture in flight
+    // still lands, so the tap after it is the one that recalibrates.
+    refShot = busy ? currentShot + 1 : currentShot;
+    levelStartYaw = rawYaw = displayYaw = rawRotation = null;
     updateHUD();
     return;
   }
@@ -350,19 +356,26 @@ function angleDiff(a, b) {
   return ((((a - b) % 360) + 540) % 360) - 180;
 }
 
+// R = Rz(a)Rx(b)Ry(g), row-major: device to world coords (X east, Y north, Z up).
+function deviceRotation(alpha, beta, gamma) {
+  const cA = Math.cos(alpha * DEG), sA = Math.sin(alpha * DEG);
+  const cB = Math.cos(beta * DEG), sB = Math.sin(beta * DEG);
+  const cG = Math.cos(gamma * DEG), sG = Math.sin(gamma * DEG);
+  return [
+    cA * cG - sA * sB * sG, -sA * cB, cA * sG + sA * sB * cG,
+    sA * cG + cA * sB * sG, cA * cB, sA * sG - cA * sB * cG,
+    -cB * sG, sB, cB * cG,
+  ];
+}
+
 // Never read e.alpha directly: deviceorientation is Euler ZXY, and alpha/gamma go
 // degenerate at beta = +-90 - exactly the 0 degree level, with the phone upright.
-// The azimuth of the rear camera axis (device -z) in R = Rz(a)Rx(b)Ry(g) stays stable
-// there: the alpha/gamma noise cancels out. Only the single-shot +-90 levels point the
-// axis vertical, where it has no azimuth, and they never re-zero the heading.
-function cameraHeading(alpha, beta, gamma) {
-  const cA = Math.cos(alpha * DEG), sA = Math.sin(alpha * DEG);
-  const sB = Math.sin(beta * DEG);
-  const cG = Math.cos(gamma * DEG), sG = Math.sin(gamma * DEG);
-  // third column of R: the device +z axis in world coords (X east, Y north, Z up)
-  const m13 = cA * sG + sA * sB * cG;
-  const m23 = sA * sG - cA * sB * cG;
-  return normDeg(Math.atan2(-m13, -m23) / DEG);
+// The azimuth of the rear camera axis (device -z) in R stays stable there: the
+// alpha/gamma noise cancels out. Only the single-shot +-90 levels point the axis
+// vertical, where it has no azimuth, and they never re-zero the heading.
+function cameraHeading(m) {
+  // third column of R: the device +z axis in world coords
+  return normDeg(Math.atan2(-m[2], -m[5]) / DEG);
 }
 
 function disableTilt() {
@@ -381,7 +394,9 @@ function handleOrientation(e) {
   gotOrientation = true;
   // Elevation of the camera axis. Plain beta - 90 wraps to -270 past the zenith.
   rawPitch = Math.asin(-Math.cos(e.beta * DEG) * Math.cos((e.gamma || 0) * DEG)) / DEG;
-  if (e.alpha != null && e.gamma != null) rawYaw = cameraHeading(e.alpha, e.beta, e.gamma);
+  if (e.alpha == null || e.gamma == null) return;
+  rawRotation = deviceRotation(e.alpha, e.beta, e.gamma);
+  rawYaw = cameraHeading(rawRotation);
 }
 
 function renderLoop(now) {
@@ -402,6 +417,7 @@ function renderLoop(now) {
     updateSpin();
   }
   drawDome();
+  if (!hasVFC) drawTargets();
 
   uiFrames++;
   if (!fpsAt) fpsAt = now;
@@ -569,8 +585,7 @@ function drawDome() {
   // (112.5 - pitch) / 225 lands each LEVEL_TARGETS entry on the CENTRE of its ring
   // (+90 -> 0.1, 0 -> 0.5, -90 -> 0.9) rather than on the seam between two rings.
   // Heading lost: no cursor until the recalibration tap.
-  const lost = refShot > 0 && currentShot === refShot;
-  const live = gyroActive && !lost && displayPitch !== null && displayYaw !== null && levelStartYaw !== null;
+  const live = gyroActive && !headingLost() && displayPitch !== null && displayYaw !== null && levelStartYaw !== null;
   let x = 0, y = 0, key = "";
   if (live) {
     const r = Math.max(0, Math.min(1, (112.5 - displayPitch) / 225)) * domeR;
@@ -594,6 +609,80 @@ function drawDome() {
   domeCtx.lineWidth = 2 * domeScale;
   domeCtx.strokeStyle = "rgba(0,0,0,0.55)";
   domeCtx.stroke();
+}
+
+// World-locked targets: each shot of the level drawn where it sits in the scene, from
+// the raw orientation (no smoothing, it would trail the image). The browser does not
+// report the camera's field of view, so it assumes a typical phone main camera.
+const TARGETS_HFOV = 53; // degrees across the portrait preview
+const targets = $("targets");
+const targetsCtx = targets.getContext("2d");
+let targetsW = 0, targetsH = 0, targetsScale = 1;
+
+function initTargets() {
+  targetsScale = Math.min(window.devicePixelRatio || 1, 2); // 3x adds memory, not visible detail
+  targetsW = targets.clientWidth;
+  targetsH = targets.clientHeight;
+  // Resize only when the size changes (realloc leaks on iOS).
+  const w = Math.round(targetsW * targetsScale), h = Math.round(targetsH * targetsScale);
+  if (targets.width !== w) targets.width = w;
+  if (targets.height !== h) targets.height = h;
+}
+window.addEventListener("resize", () => { if (running) initTargets(); });
+
+function projectTarget(m, heading, pitch, f, cx, cy) {
+  const cp = Math.cos(pitch * DEG);
+  const w0 = cp * Math.sin(heading * DEG), w1 = cp * Math.cos(heading * DEG), w2 = Math.sin(pitch * DEG);
+  // world -> device is the transpose
+  const x = m[0] * w0 + m[3] * w1 + m[6] * w2;
+  const y = m[1] * w0 + m[4] * w1 + m[7] * w2;
+  const z = m[2] * w0 + m[5] * w1 + m[8] * w2;
+  if (z > -0.1) return null; // behind the camera, or too far off-axis to place
+  return { x: cx + f * x / -z, y: cy - f * y / -z };
+}
+
+function targetDot(x, y, r, color) {
+  targetsCtx.beginPath();
+  targetsCtx.arc(x, y, r, 0, Math.PI * 2);
+  targetsCtx.fillStyle = color;
+  targetsCtx.fill();
+  targetsCtx.lineWidth = 1.5;
+  targetsCtx.strokeStyle = "rgba(0,0,0,0.55)";
+  targetsCtx.stroke();
+}
+
+function targetRing(x, y, r, color) {
+  targetsCtx.beginPath();
+  targetsCtx.arc(x, y, r, 0, Math.PI * 2);
+  targetsCtx.lineWidth = 4;
+  targetsCtx.strokeStyle = "rgba(0,0,0,0.55)";
+  targetsCtx.stroke();
+  targetsCtx.lineWidth = 2;
+  targetsCtx.strokeStyle = color;
+  targetsCtx.stroke();
+}
+
+function drawTargets() {
+  if (!targetsW) return; // capture screen not laid out yet
+  targetsCtx.setTransform(targetsScale, 0, 0, targetsScale, 0, 0);
+  targetsCtx.clearRect(0, 0, targetsW, targetsH);
+
+  const m = rawRotation;
+  if (!gyroActive || !m || headingLost() || levelStartYaw === null || currentLevel >= LEVEL_TARGETS.length) return;
+
+  const cx = targetsW / 2, cy = targetsH / 2;
+  const f = cx / Math.tan(TARGETS_HFOV * DEG / 2);
+  for (let i = 0; i < LEVEL_SHOTS[currentLevel]; i++) {
+    const p = projectTarget(m, levelStartYaw + ROTATION_SIGN * yawStep() * i, LEVEL_TARGETS[currentLevel], f, cx, cy);
+    if (!p) continue;
+    if (i === currentShot) {
+      targetRing(p.x, p.y, 14, domeInk.ok);
+      targetDot(p.x, p.y, 3, domeInk.ok);
+    } else {
+      targetDot(p.x, p.y, 5, i < currentShot ? domeInk.accent : "#fff");
+    }
+  }
+  targetRing(cx, cy, 6, "#fff"); // aim point
 }
 
 function updateHUD() {
@@ -705,7 +794,7 @@ captureBtn.addEventListener("click", async () => {
   if (busy || currentLevel >= LEVEL_TARGETS.length) return;
 
   // Recalibration: aimed back at the last photo, so no photo is taken.
-  if (refShot > 0 && currentShot === refShot && gyroActive && rawYaw !== null) {
+  if (headingLost() && gyroActive && rawYaw !== null) {
     levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * yawStep() * (currentShot - 1));
     refShot = 0;
     updateHUD();
@@ -713,6 +802,7 @@ captureBtn.addEventListener("click", async () => {
   }
 
   busy = true;
+  const tapYaw = rawYaw; // the capture can take a second, and the phone moves on
 
   flash.classList.add("animate");
   setTimeout(() => flash.classList.remove("animate"), 180);
@@ -726,6 +816,7 @@ captureBtn.addEventListener("click", async () => {
   busy = false;
 
   if (!blob) {
+    if (refShot > currentShot) refShot = currentShot; // hidden mid-capture: recalibrate now
     prompt.textContent = "Frame dropped - tap again.";
     return;
   }
@@ -741,8 +832,8 @@ captureBtn.addEventListener("click", async () => {
   // The reference shot re-zeroes the heading (stored as where shot 0 sits), so drift
   // only builds up within one level (~1 min), never across the whole run. Not at the
   // poles: a vertical camera axis has no heading.
-  if (currentShot === refShot && rawYaw !== null && LEVEL_SHOTS[currentLevel] > 1) {
-    levelStartYaw = normDeg(rawYaw - ROTATION_SIGN * yawStep() * currentShot);
+  if (currentShot === refShot && tapYaw !== null && LEVEL_SHOTS[currentLevel] > 1) {
+    levelStartYaw = normDeg(tapYaw - ROTATION_SIGN * yawStep() * currentShot);
   }
 
   currentShot++;
