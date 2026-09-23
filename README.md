@@ -8,6 +8,10 @@ ring at the next one. At the end it packs every shot into a single `.zip`.
 
 All photos come out **3:4 portrait**.
 
+## Deploy
+
+https://rpfacco.github.io/guided-360-capture/
+
 ## Running it
 
 The camera and the gyroscope are both gated behind a **secure context**, so the page
