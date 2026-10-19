@@ -1,6 +1,6 @@
 import { LEVEL_TARGETS, LEVEL_SHOTS, TOTAL_SHOTS, shotsBefore, currentLevel, currentShot, refShot, photos, yawStep, spinTarget } from "./session.js";
 import { ROTATION_SIGN, gyroActive, displayYaw, angleDiff } from "./orientation.js";
-import { hasVFC, frameSeq, previewLabel, shotW, shotH } from "./camera.js";
+import { hasVFC, frameSeq, previewLabel, exposureLabel, shotW, shotH } from "./camera.js";
 import { drawDomeBase } from "./dome.js";
 
 const TOLERANCE = 5;
@@ -27,7 +27,7 @@ let shotLabel = "—", fpsText = "…";
 let uiFrames = 0, fpsAt = 0, fpsSeq = 0;
 
 export function updatePerf() {
-  perf.textContent = "FPS " + fpsText + " · Preview " + previewLabel + " · Shot " + shotLabel;
+  perf.textContent = "FPS " + fpsText + " · Preview " + previewLabel + " · Shot " + shotLabel + " · Exposure " + exposureLabel;
 }
 
 function fmtSize(bytes) {
