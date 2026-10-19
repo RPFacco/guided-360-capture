@@ -6,28 +6,23 @@ const loginForm = $("login-form"), emailInput = $("email"), passwordInput = $("p
 const registerBtn = $("register-btn"), loginBackBtn = $("login-back-btn"), loginError = $("login-error");
 const library = $("library"), libraryBackBtn = $("library-back-btn"), logoutBtn = $("logout-btn");
 const zipInput = $("zip-input"), libraryMessage = $("library-message"), list = $("panorama-list");
+const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message");
 
 const POLL_MS = 5000;
 const STATUS_LABELS = { pending: "Waiting", processing: "Stitching…", done: "Ready", failed: "Failed" };
 
-const preview = document.createElement("img");
-preview.className = "pano-preview";
-preview.alt = "Panorama";
-
 let panoramas = [];
-let previewId = null;
-let previewUrl = null;
 let pollTimer = null;
+let viewer = null;
+let viewerGen = 0;
 
 function show(id) {
   for (const screen of document.querySelectorAll(".screen")) {
     screen.classList.toggle("active", screen.id === id);
     screen.classList.toggle("hidden", screen.id !== id);
   }
-  if (id !== "library") {
-    clearTimeout(pollTimer);
-    closePreview();
-  }
+  if (id !== "library") clearTimeout(pollTimer);
+  if (id !== "viewer") closeViewer();
 }
 
 function setMessage(text) {
@@ -143,56 +138,51 @@ function item(panorama) {
   row.append(info, badge);
 
   if (panorama.status === "done") {
-    const open = previewId === panorama.id;
     const button = document.createElement("button");
     button.className = "btn small";
-    button.textContent = open ? (previewUrl ? "Hide" : "Loading…") : "View";
-    button.addEventListener("click", () => togglePreview(panorama.id));
+    button.textContent = "View";
+    button.addEventListener("click", () => openViewer(panorama.id));
     row.append(button);
   }
 
   const li = document.createElement("li");
   li.className = "pano-item";
   li.append(row);
-  if (previewId === panorama.id && previewUrl) li.append(preview);
   return li;
 }
 
-async function togglePreview(id) {
-  const wasOpen = previewId === id;
-  closePreview();
-  if (wasOpen) {
-    draw();
-    return;
-  }
-
-  previewId = id;
-  draw();
-  try {
-    const res = await api(`/api/panoramas/${id}/image`);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const blob = await res.blob();
-    if (previewId !== id) return; // another one was opened meanwhile
-    previewUrl = URL.createObjectURL(blob);
-    preview.src = previewUrl;
-  } catch (err) {
-    if (previewId !== id) return;
-    closePreview();
-    if (err instanceof AuthError) {
-      handleError(err);
-      return;
-    }
-    setMessage("Could not load the image.");
-  }
-  draw();
+function setViewerMessage(text) {
+  viewerMessage.textContent = text;
+  viewerMessage.classList.toggle("hidden", !text);
 }
 
-function closePreview() {
-  if (previewUrl) URL.revokeObjectURL(previewUrl);
-  previewUrl = null;
-  previewId = null;
-  preview.removeAttribute("src");
-  preview.remove();
+async function openViewer(id) {
+  const gen = ++viewerGen;
+  setViewerMessage("Loading…");
+  show("viewer");
+  let url = null;
+  try {
+    const [res, { startViewer }] = await Promise.all([api(`/api/panoramas/${id}/image`), import("./viewer.js")]);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (gen !== viewerGen) return;
+    url = URL.createObjectURL(blob);
+    const started = await startViewer(url, setViewerMessage);
+    if (gen !== viewerGen) return started.stop();
+    viewer = started;
+  } catch (err) {
+    if (gen !== viewerGen) return;
+    if (err instanceof AuthError) return handleError(err);
+    setViewerMessage("Could not open the panorama.");
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+  }
+}
+
+function closeViewer() {
+  viewerGen++;
+  viewer?.stop();
+  viewer = null;
 }
 
 zipInput.addEventListener("change", async () => {
@@ -219,6 +209,7 @@ zipInput.addEventListener("change", async () => {
 libraryBtn.addEventListener("click", openLibrary);
 loginBackBtn.addEventListener("click", () => show("intro"));
 libraryBackBtn.addEventListener("click", () => show("intro"));
+viewerBackBtn.addEventListener("click", openLibrary);
 registerBtn.addEventListener("click", register);
 loginForm.addEventListener("submit", (e) => {
   e.preventDefault();

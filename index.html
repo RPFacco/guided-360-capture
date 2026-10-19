@@ -46,6 +46,15 @@
   <ul id="panorama-list" class="panorama-list"></ul>
 </section>
 
+<section id="viewer" class="screen hidden">
+  <div id="viewer-stage" class="viewer-stage"></div>
+  <header class="viewer-top">
+    <button id="viewer-back-btn" class="link">← Panoramas</button>
+  </header>
+  <button id="sensor-btn" class="btn sensor-btn hidden">Enable sensors</button>
+  <p id="viewer-message" class="viewer-message hidden"></p>
+</section>
+
 <section id="capture" class="screen hidden">
   <video id="video" playsinline autoplay muted></video>
   <canvas id="targets" aria-hidden="true"></canvas>
