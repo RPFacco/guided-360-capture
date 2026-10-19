@@ -7,24 +7,26 @@ import {
   requestGyro, startOrientation, stopOrientation, smoothOrientation, forgetHeading,
   captureRotation,
 } from "./orientation.js";
-import { hasVFC, onFrame, startCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
+import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
 import { updateTilt, updateSpin, hideGauges, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
 import { holdProgress, updateAutoShot } from "./autoshot.js";
 import { openStorage, savePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
+import { stitchCapture } from "./library.js";
 
 const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
 const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("error");
-const captureBtn = $("capture-btn"), exportBtn = $("export-btn");
+const captureBtn = $("capture-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const flash = $("flash");
 
 let running = false;
 let busy = false;
 let storedCount = 0; // photos an earlier page left behind, from shot 1 with no gaps
 let restartArmed = false;
+let wakeLock = null;
 
 const dbReady = openStorage().then((n) => {
   storedCount = n;
@@ -104,7 +106,22 @@ function noSensor() {
 
 // The browser drops the lock when the page is hidden.
 function keepAwake() {
-  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").then((lock) => { wakeLock = lock; }, () => {});
+}
+
+function leaveCapture() {
+  running = false;
+  stopOrientation();
+  stopCamera();
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+
+  storedCount = photos.length;
+  startBtn.textContent = `Continue (${storedCount} of ${TOTAL_SHOTS})`;
+  restartArmed = false;
+  restartBtn.textContent = "Start over";
+  restartBtn.classList.remove("hidden");
+  startBtn.disabled = restartBtn.disabled = false;
 }
 
 document.addEventListener("visibilitychange", () => {
@@ -178,48 +195,70 @@ async function shoot() {
   updateHUD();
 }
 
+async function packPhotos() {
+  const files = [];
+  const entries = [];
+  const fovSources = new Set();
+  for (const p of photos) {
+    const blob = await readPhoto(p);
+    if (!blob) throw new Error(`shot ${photoKey(p) + 1} is missing from storage`);
+    const l = String(p.level + 1).padStart(2, "0");
+    const s = String(p.shot + 1).padStart(2, "0");
+    const name = `360_photos/level_${l}_shot_${s}.jpg`;
+    files.push({ name, blob });
+    if (p.fov && p.fov.source) fovSources.add(p.fov.source);
+    entries.push({
+      file: name,
+      level: p.level + 1,
+      shot: p.shot + 1,
+      tilt: LEVEL_TARGETS[p.level],
+      fov: p.fov || null,
+      rotation: p.rotation || null,
+      target: p.target || null,
+    });
+  }
+
+  const doc = {
+    format: "guided-360-capture/v1",
+    generated: new Date().toISOString(),
+    shotLayout: { tiltDegrees: LEVEL_TARGETS, shotsPerLevel: LEVEL_SHOTS },
+    fovSource: fovSources.size === 1 ? [...fovSources][0] : "mixed",
+    conventions: {
+      rotation: "yaw/clkwise-from-level-reference, pitch above horizon, roll about the optical axis, all degrees",
+      matrix: "row-major 3x3 device-to-world; world X east, Y north, Z up; camera axis is device -Z",
+      fov: "rectilinear degrees; horizontal across width, vertical across height, for the stored orientation",
+    },
+    photos: entries,
+  };
+  files.push({ name: "metadata.json", blob: new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }) });
+
+  return buildZip(files);
+}
+
+stitchBtn.addEventListener("click", async () => {
+  const label = stitchBtn.textContent;
+  stitchBtn.disabled = true;
+  stitchBtn.textContent = "Packing…";
+  let content;
+  try {
+    content = await packPhotos();
+  } catch (err) {
+    alert("Failed to build ZIP: " + err.message);
+    return;
+  } finally {
+    stitchBtn.disabled = false;
+    stitchBtn.textContent = label;
+  }
+  leaveCapture();
+  stitchCapture(content);
+});
+
 exportBtn.addEventListener("click", async () => {
   const label = exportBtn.textContent;
   exportBtn.disabled = true;
   exportBtn.textContent = "Packing…";
   try {
-    const files = [];
-    const entries = [];
-    const fovSources = new Set();
-    for (const p of photos) {
-      const blob = await readPhoto(p);
-      if (!blob) throw new Error(`shot ${photoKey(p) + 1} is missing from storage`);
-      const l = String(p.level + 1).padStart(2, "0");
-      const s = String(p.shot + 1).padStart(2, "0");
-      const name = `360_photos/level_${l}_shot_${s}.jpg`;
-      files.push({ name, blob });
-      if (p.fov && p.fov.source) fovSources.add(p.fov.source);
-      entries.push({
-        file: name,
-        level: p.level + 1,
-        shot: p.shot + 1,
-        tilt: LEVEL_TARGETS[p.level],
-        fov: p.fov || null,
-        rotation: p.rotation || null,
-        target: p.target || null,
-      });
-    }
-
-    const doc = {
-      format: "guided-360-capture/v1",
-      generated: new Date().toISOString(),
-      shotLayout: { tiltDegrees: LEVEL_TARGETS, shotsPerLevel: LEVEL_SHOTS },
-      fovSource: fovSources.size === 1 ? [...fovSources][0] : "mixed",
-      conventions: {
-        rotation: "yaw/clkwise-from-level-reference, pitch above horizon, roll about the optical axis, all degrees",
-        matrix: "row-major 3x3 device-to-world; world X east, Y north, Z up; camera axis is device -Z",
-        fov: "rectilinear degrees; horizontal across width, vertical across height, for the stored orientation",
-      },
-      photos: entries,
-    };
-    files.push({ name: "metadata.json", blob: new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }) });
-
-    const content = await buildZip(files);
+    const content = await packPhotos();
     const url = URL.createObjectURL(content);
     const a = document.createElement("a");
     a.href = url;

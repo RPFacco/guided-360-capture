@@ -15,7 +15,7 @@ const levelLabel = $("level-label"), shotCounter = $("shot-label");
 const tilt = $("tilt"), bubble = $("tilt-bubble"), angleEl = $("angle");
 const spin = $("spin"), spinBubble = $("spin-bubble"), spinDeg = $("spin-deg");
 const prompt = $("prompt");
-const captureBtn = $("capture-btn"), exportBtn = $("export-btn");
+const captureBtn = $("capture-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const perf = $("perf");
 
 export let tiltAligned = false;
@@ -135,8 +135,9 @@ export function updateHUD() {
   if (done >= TOTAL_SHOTS) {
     levelLabel.textContent = "Done";
     shotCounter.textContent = photos.length + " photos";
-    prompt.textContent = "All set. Download the pack below.";
+    prompt.textContent = "All set. Stitch the panorama or download the photos.";
     captureBtn.classList.add("hidden");
+    stitchBtn.classList.remove("hidden");
     exportBtn.classList.remove("hidden");
     tilt.classList.add("hidden");
     spin.classList.add("hidden");

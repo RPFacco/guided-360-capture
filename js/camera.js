@@ -54,9 +54,13 @@ function isPhotoShaped(s) {
   return Math.abs(ar - SHOT_AR) < 0.02 || Math.abs(ar - 1 / SHOT_AR) < 0.02;
 }
 
-export async function startCamera() {
+export function stopCamera() {
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null;
+}
+
+export async function startCamera() {
+  stopCamera();
 
   imageCapture = null;
 

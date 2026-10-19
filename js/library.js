@@ -15,6 +15,7 @@ let panoramas = [];
 let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
+let pendingUpload = null;
 
 function show(id) {
   for (const screen of document.querySelectorAll(".screen")) {
@@ -44,6 +45,11 @@ function handleError(err) {
   }
 }
 
+export function stitchCapture(zip) {
+  pendingUpload = zip;
+  openLibrary();
+}
+
 function openLibrary() {
   if (!getToken()) {
     show("login");
@@ -51,7 +57,13 @@ function openLibrary() {
   }
   setMessage("");
   show("library");
-  refresh();
+  if (!pendingUpload) {
+    refresh();
+    return;
+  }
+  const zip = pendingUpload;
+  pendingUpload = null;
+  upload(zip);
 }
 
 async function signIn() {
@@ -185,14 +197,16 @@ function closeViewer() {
   viewer = null;
 }
 
-zipInput.addEventListener("change", async () => {
+zipInput.addEventListener("change", () => {
   const file = zipInput.files[0];
   zipInput.value = "";
-  if (!file) return;
+  if (file) upload(file);
+});
 
+async function upload(file) {
   setMessage("Uploading…");
   const body = new FormData();
-  body.append("file", file);
+  body.append("file", file, file.name || "360_photos.zip");
   try {
     const res = await api("/api/panoramas", { method: "POST", body });
     if (res.status === 201) setMessage("Uploaded. Stitching takes about a minute.");
@@ -204,10 +218,13 @@ zipInput.addEventListener("change", async () => {
     return;
   }
   refresh();
-});
+}
 
 libraryBtn.addEventListener("click", openLibrary);
-loginBackBtn.addEventListener("click", () => show("intro"));
+loginBackBtn.addEventListener("click", () => {
+  pendingUpload = null;
+  show("intro");
+});
 libraryBackBtn.addEventListener("click", () => show("intro"));
 viewerBackBtn.addEventListener("click", openLibrary);
 registerBtn.addEventListener("click", register);
