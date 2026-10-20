@@ -1,4 +1,8 @@
-export const API_URL = "http://localhost:5000";
+const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
+
+export const API_URL = LOCAL_HOSTS.includes(location.hostname)
+  ? "http://localhost:5000"
+  : "https://rpfacco-panorama.northcentralus.cloudapp.azure.com";
 
 const TOKEN_KEY = "guided-360-token";
 
