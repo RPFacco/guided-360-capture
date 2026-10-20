@@ -28,6 +28,29 @@ export function postJson(path, data) {
   });
 }
 
+export function apiUpload(path, body, onProgress) {
+  const token = getToken();
+  if (!token) return Promise.reject(new AuthError());
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", API_URL + path);
+    xhr.setRequestHeader("Authorization", "Bearer " + token);
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) onProgress(e.loaded / e.total);
+    };
+    xhr.onload = () => {
+      if (xhr.status === 401) {
+        clearToken();
+        reject(new AuthError());
+      } else {
+        resolve(xhr.status);
+      }
+    };
+    xhr.onerror = () => reject(new Error("Network error"));
+    xhr.send(body);
+  });
+}
+
 export async function api(path, options = {}) {
   const token = getToken();
   if (!token) throw new AuthError();

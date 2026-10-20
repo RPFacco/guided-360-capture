@@ -1,4 +1,4 @@
-import { AuthError, api, clearToken, getToken, postJson, setToken } from "./api.js";
+import { AuthError, api, apiUpload, clearToken, getToken, postJson, setToken } from "./api.js";
 
 const $ = (id) => document.getElementById(id);
 const libraryBtn = $("library-btn");
@@ -203,19 +203,31 @@ zipInput.addEventListener("change", () => {
   if (file) upload(file);
 });
 
+async function keepScreenOn() {
+  try {
+    return await navigator.wakeLock?.request("screen");
+  } catch (_) {
+    return null;
+  }
+}
+
 async function upload(file) {
-  setMessage("Uploading…");
+  const progress = (fraction) => setMessage(`Uploading… ${Math.round(fraction * 100)}%. Keep this screen open.`);
+  progress(0);
   const body = new FormData();
   body.append("file", file, file.name || "360_photos.zip");
+  const lock = await keepScreenOn();
   try {
-    const res = await api("/api/panoramas", { method: "POST", body });
-    if (res.status === 201) setMessage("Uploaded. Stitching takes about a minute.");
-    else if (res.status === 400) setMessage("That file is not a capture .zip.");
-    else if (res.status === 413) setMessage("The file is over 300 MB.");
-    else setMessage(`Upload failed (${res.status}).`);
+    const status = await apiUpload("/api/panoramas", body, progress);
+    if (status === 201) setMessage("Uploaded. You can close the app now: stitching takes about 3 minutes.");
+    else if (status === 400) setMessage("That file is not a capture .zip.");
+    else if (status === 413) setMessage("The file is over 300 MB.");
+    else setMessage(`Upload failed (${status}).`);
   } catch (err) {
     handleError(err);
     return;
+  } finally {
+    lock?.release().catch(() => {});
   }
   refresh();
 }
