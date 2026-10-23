@@ -314,6 +314,8 @@ html, body {
 .badge.done { background: rgba(52, 209, 122, 0.15); color: var(--ok); }
 .badge.failed { background: rgba(255, 128, 128, 0.12); color: #ff8080; }
 .btn.small { padding: 8px 14px; font-size: 0.9rem; border-radius: 10px; }
+.pano-actions { display: flex; gap: 8px; margin-top: 10px; }
+.pano-actions .btn { flex: 1; }
 
 #viewer { background: #000; }
 .viewer-stage { position: absolute; inset: 0; }

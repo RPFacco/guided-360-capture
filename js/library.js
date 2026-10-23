@@ -16,8 +16,10 @@ let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
 // Not revoked when the viewer closes: Opera reads a download URL only once the user
-// confirms its prompt.
+// confirms its prompt. Same for the list's last download.
 let image = null;
+let listUrl = null;
+let listBusy = false;
 let pendingUpload = null;
 
 function show(id) {
@@ -152,18 +154,57 @@ function item(panorama) {
   row.className = "pano-row";
   row.append(info, badge);
 
-  if (panorama.status === "done") {
-    const button = document.createElement("button");
-    button.className = "btn small";
-    button.textContent = "View";
-    button.addEventListener("click", () => openViewer(panorama.id));
-    row.append(button);
-  }
-
   const li = document.createElement("li");
   li.className = "pano-item";
   li.append(row);
+
+  if (panorama.status === "done") {
+    const view = document.createElement("button");
+    view.className = "btn small";
+    view.textContent = "View";
+    view.addEventListener("click", () => openViewer(panorama.id));
+
+    const download = document.createElement("button");
+    download.className = "btn small";
+    download.textContent = "Download";
+    download.addEventListener("click", () => downloadPanorama(panorama.id, download));
+
+    const actions = document.createElement("div");
+    actions.className = "pano-actions";
+    actions.append(view, download);
+    li.append(actions);
+  }
   return li;
+}
+
+const imageName = (id) => `panorama_${id}.jpg`;
+
+function saveFile(url, name) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+}
+
+// One at a time: the next download revokes this one's URL.
+async function downloadPanorama(id, button) {
+  if (listBusy) return;
+  listBusy = true;
+  button.textContent = "Downloading…";
+  try {
+    const res = await api(`/api/panoramas/${id}/image`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (listUrl) URL.revokeObjectURL(listUrl);
+    listUrl = URL.createObjectURL(blob);
+    saveFile(listUrl, imageName(id));
+  } catch (err) {
+    if (err instanceof AuthError) handleError(err);
+    else setMessage("Could not download the panorama.");
+  } finally {
+    listBusy = false;
+    button.textContent = "Download";
+  }
 }
 
 function setViewerMessage(text) {
@@ -182,7 +223,7 @@ async function openViewer(id) {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     if (gen !== viewerGen) return;
-    image = { url: URL.createObjectURL(blob), name: `panorama_${id}.jpg` };
+    image = { url: URL.createObjectURL(blob), name: imageName(id) };
     downloadBtn.classList.remove("hidden");
     const started = await startViewer(image.url, setViewerMessage);
     if (gen !== viewerGen) return started.stop();
@@ -243,12 +284,7 @@ loginBackBtn.addEventListener("click", () => {
 });
 libraryBackBtn.addEventListener("click", () => show("intro"));
 viewerBackBtn.addEventListener("click", openLibrary);
-downloadBtn.addEventListener("click", () => {
-  const a = document.createElement("a");
-  a.href = image.url;
-  a.download = image.name;
-  a.click();
-});
+downloadBtn.addEventListener("click", () => saveFile(image.url, image.name));
 registerBtn.addEventListener("click", register);
 loginForm.addEventListener("submit", (e) => {
   e.preventDefault();
