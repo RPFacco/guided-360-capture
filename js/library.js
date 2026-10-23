@@ -6,7 +6,7 @@ const loginForm = $("login-form"), emailInput = $("email"), passwordInput = $("p
 const registerBtn = $("register-btn"), loginBackBtn = $("login-back-btn"), loginError = $("login-error");
 const library = $("library"), libraryBackBtn = $("library-back-btn"), logoutBtn = $("logout-btn");
 const zipInput = $("zip-input"), libraryMessage = $("library-message"), list = $("panorama-list");
-const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message");
+const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message"), downloadBtn = $("download-btn");
 
 const POLL_MS = 5000;
 const STATUS_LABELS = { pending: "Waiting", processing: "Stitching…", done: "Ready", failed: "Failed" };
@@ -15,6 +15,9 @@ let panoramas = [];
 let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
+// Not revoked when the viewer closes: Opera reads a download URL only once the user
+// confirms its prompt.
+let image = null;
 let pendingUpload = null;
 
 function show(id) {
@@ -172,22 +175,22 @@ async function openViewer(id) {
   const gen = ++viewerGen;
   setViewerMessage("Loading…");
   show("viewer");
-  let url = null;
+  if (image) URL.revokeObjectURL(image.url);
+  image = null;
   try {
     const [res, { startViewer }] = await Promise.all([api(`/api/panoramas/${id}/image`), import("./viewer.js")]);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const blob = await res.blob();
     if (gen !== viewerGen) return;
-    url = URL.createObjectURL(blob);
-    const started = await startViewer(url, setViewerMessage);
+    image = { url: URL.createObjectURL(blob), name: `panorama_${id}.jpg` };
+    downloadBtn.classList.remove("hidden");
+    const started = await startViewer(image.url, setViewerMessage);
     if (gen !== viewerGen) return started.stop();
     viewer = started;
   } catch (err) {
     if (gen !== viewerGen) return;
     if (err instanceof AuthError) return handleError(err);
     setViewerMessage("Could not open the panorama.");
-  } finally {
-    if (url) URL.revokeObjectURL(url);
   }
 }
 
@@ -195,6 +198,7 @@ function closeViewer() {
   viewerGen++;
   viewer?.stop();
   viewer = null;
+  downloadBtn.classList.add("hidden");
 }
 
 zipInput.addEventListener("change", () => {
@@ -239,6 +243,12 @@ loginBackBtn.addEventListener("click", () => {
 });
 libraryBackBtn.addEventListener("click", () => show("intro"));
 viewerBackBtn.addEventListener("click", openLibrary);
+downloadBtn.addEventListener("click", () => {
+  const a = document.createElement("a");
+  a.href = image.url;
+  a.download = image.name;
+  a.click();
+});
 registerBtn.addEventListener("click", register);
 loginForm.addEventListener("submit", (e) => {
   e.preventDefault();
