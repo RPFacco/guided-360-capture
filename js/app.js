@@ -263,8 +263,9 @@ exportBtn.addEventListener("click", async () => {
     const a = document.createElement("a");
     a.href = url;
     a.download = "360_photos.zip";
+    // Not revoked: Opera only reads the URL once the user confirms its download prompt,
+    // and a revoked one crashed it.
     a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
     exportBtn.textContent = "Downloaded!";
   } catch (err) {
     alert("Failed to build ZIP: " + err.message);
