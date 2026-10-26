@@ -30,6 +30,9 @@ export async function startViewer(imageUrl, say) {
   let controls = null;
   let aligned = false;
   let sensorTimer = null;
+  let yaw = 0;
+  let pitch = 0;
+  let drag = null;
   const events = new AbortController();
 
   function resize() {
@@ -42,15 +45,35 @@ export async function startViewer(imageUrl, say) {
     sensorBtn.classList.add("hidden");
     controls = new DeviceOrientationControls(camera);
     sensorTimer = setTimeout(() => {
-      if (!aligned) say("Motion sensor not available.");
+      if (!aligned) say("Motion sensor not available. Drag to look around.");
     }, SENSOR_WAIT_MS);
+  }
+
+  function onPointerDown(e) {
+    if (aligned || drag) return;
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    renderer.domElement.setPointerCapture(e.pointerId);
+  }
+
+  function onPointerMove(e) {
+    if (aligned || drag?.id !== e.pointerId) return;
+    const radPerPx = THREE.MathUtils.degToRad(camera.fov) / stage.clientHeight;
+    yaw += (e.clientX - drag.x) * radPerPx;
+    pitch = THREE.MathUtils.clamp(pitch + (e.clientY - drag.y) * radPerPx, -Math.PI / 2, Math.PI / 2);
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    camera.rotation.set(pitch, yaw, 0, "YXZ");
+  }
+
+  function onPointerUp(e) {
+    if (drag?.id === e.pointerId) drag = null;
   }
 
   function frame() {
     if (controls && controls.deviceOrientation.alpha != null) {
       if (!aligned) {
         controls.update();
-        controls.alphaOffset = -camera.rotation.y;
+        controls.alphaOffset = yaw - camera.rotation.y;
         aligned = true;
       }
       controls.update();
@@ -60,6 +83,10 @@ export async function startViewer(imageUrl, say) {
 
   window.addEventListener("resize", resize, { signal: events.signal });
   sensorBtn.addEventListener("click", startSensors, { signal: events.signal });
+  renderer.domElement.addEventListener("pointerdown", onPointerDown, { signal: events.signal });
+  renderer.domElement.addEventListener("pointermove", onPointerMove, { signal: events.signal });
+  renderer.domElement.addEventListener("pointerup", onPointerUp, { signal: events.signal });
+  renderer.domElement.addEventListener("pointercancel", onPointerUp, { signal: events.signal });
 
   say("");
   resize();
