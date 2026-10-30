@@ -8,7 +8,7 @@ import {
   captureRotation,
 } from "./orientation.js";
 import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
-import { updateTilt, updateSpin, hideGauges, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
+import { updateTilt, updateSpin, waiveAlignment, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
 import { holdProgress, updateAutoShot } from "./autoshot.js";
@@ -100,7 +100,7 @@ async function begin(resume) {
 
 function noSensor() {
   stopOrientation();
-  hideGauges();
+  waiveAlignment();
   updateHUD();
 }
 

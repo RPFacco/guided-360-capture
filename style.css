@@ -114,54 +114,6 @@ html, body {
   text-shadow: 0 1px 3px rgba(0,0,0,0.7);
 }
 
-.tilt {
-  position: absolute;
-  top: 50%;
-  right: 18px;
-  transform: translateY(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-.tilt-track {
-  position: relative;
-  width: 10px;
-  height: 220px;
-  background: var(--track);
-  border-radius: 999px;
-}
-.tilt-center {
-  position: absolute;
-  top: 50%; left: -7px; right: -7px;
-  height: 2px;
-  background: rgba(255,255,255,0.5);
-  transform: translateY(-50%);
-}
-.tilt-bubble {
-  position: absolute;
-  top: 50%; left: 50%;
-  width: 26px; height: 26px;
-  margin: -13px 0 0 -13px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 3px solid #fff;
-  will-change: transform;
-}
-.tilt.aligned .tilt-bubble { background: var(--ok); }
-.angle {
-  min-width: 3.2rem;
-  text-align: center;
-  font-variant-numeric: tabular-nums;
-  font-weight: 700;
-  font-size: 1.1rem;
-  padding: 4px 8px;
-  border-radius: 8px;
-  background: var(--panel);
-  text-shadow: 0 1px 3px rgba(0,0,0,0.6);
-}
-.tilt.aligned .angle { background: rgba(52, 209, 122, 0.22); }
-
 .hud-bottom {
   position: absolute;
   left: 0; right: 0; bottom: 0;
@@ -203,7 +155,7 @@ html, body {
   0% { opacity: 0.85; }
   100% { opacity: 0; }
 }
-/* Coverage dome, mirroring .tilt on the opposite edge. Size must match DOME_PX in dome.js. */
+/* Coverage dome. Size must match DOME_PX in dome.js. */
 .dome {
   position: absolute;
   top: 50%;
@@ -214,41 +166,6 @@ html, body {
   filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.6));
   pointer-events: none;
 }
-
-/* Rotation gauge: the tilt bubble on its side. Same 220px track, so the bubble
-   travel (half = 97 in hud.js) matches the tilt's. */
-.spin {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-}
-.spin-track {
-  position: relative;
-  width: 220px;
-  height: 10px;
-  background: var(--track);
-  border-radius: 999px;
-}
-.spin-center {
-  position: absolute;
-  left: 50%; top: -7px; bottom: -7px;
-  width: 2px;
-  background: rgba(255, 255, 255, 0.5);
-  transform: translateX(-50%);
-}
-.spin-bubble {
-  position: absolute;
-  top: 50%; left: 50%;
-  width: 26px; height: 26px;
-  border-radius: 50%;
-  background: var(--accent);
-  border: 3px solid #fff;
-  transform: translate(-50%, -50%);
-  will-change: transform;
-}
-.spin.aligned .spin-bubble { background: var(--ok); }
-.spin.aligned .angle { background: rgba(52, 209, 122, 0.22); }
 
 #login .intro-box { width: 100%; }
 #login input {

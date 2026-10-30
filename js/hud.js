@@ -1,10 +1,9 @@
 import { LEVEL_TARGETS, LEVEL_SHOTS, TOTAL_SHOTS, shotsBefore, currentLevel, currentShot, refShot, photos, yawStep, spinTarget } from "./session.js";
-import { ROTATION_SIGN, gyroActive, displayYaw, angleDiff } from "./orientation.js";
+import { gyroActive, displayYaw, angleDiff } from "./orientation.js";
 import { hasVFC, frameSeq, previewLabel, exposureLabel, shotW, shotH } from "./camera.js";
 import { drawDomeBase } from "./dome.js";
 
 const TOLERANCE = 5;
-const RANGE = 25;
 // 6 degrees of slop still leaves the neighbours overlapping by over a third on a
 // typical phone lens.
 export const YAW_TOLERANCE = 6;
@@ -12,16 +11,12 @@ export const YAW_TOLERANCE = 6;
 const $ = (id) => document.getElementById(id);
 const progressFill = $("progress-fill");
 const levelLabel = $("level-label"), shotCounter = $("shot-label");
-const tilt = $("tilt"), bubble = $("tilt-bubble"), angleEl = $("angle");
-const spin = $("spin"), spinBubble = $("spin-bubble"), spinDeg = $("spin-deg");
 const prompt = $("prompt");
 const captureBtn = $("capture-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const perf = $("perf");
 
 export let tiltAligned = false;
 let spinAligned = false;
-let lastAngleShown = null, lastAligned = null;
-let lastSpinShown = null, lastSpinAligned = null;
 let lastReady = null;
 let shotLabel = "—", fpsText = "…";
 let uiFrames = 0, fpsAt = 0, fpsSeq = 0;
@@ -55,27 +50,8 @@ export function setPrompt(text) {
 }
 
 export function updateTilt(pitch) {
-  const target = LEVEL_TARGETS[currentLevel];
-  const diff = pitch - target;
-
-  const half = 97;
-  const clamped = Math.max(-RANGE, Math.min(RANGE, diff));
-  const offset = -(clamped / RANGE) * half;
-  bubble.style.transform = `translate(-50%, calc(-50% + ${offset.toFixed(1)}px))`;
-
-  const deg = Math.round(pitch);
-  if (deg !== lastAngleShown) {
-    angleEl.textContent = (deg > 0 ? "+" : "") + deg + "°";
-    lastAngleShown = deg;
-  }
-
-  const aligned = Math.abs(diff) <= TOLERANCE;
-  if (aligned !== lastAligned) {
-    tilt.classList.toggle("aligned", aligned);
-    tiltAligned = aligned;
-    refreshReady();
-    lastAligned = aligned;
-  }
+  tiltAligned = Math.abs(pitch - LEVEL_TARGETS[currentLevel]) <= TOLERANCE;
+  refreshReady();
 }
 
 // The shutter goes green only when both axes agree. Advisory only: a drifting sensor
@@ -89,40 +65,14 @@ function refreshReady() {
 
 export function updateSpin() {
   const target = spinTarget();
-  if (target === null || displayYaw === null || currentShot === refShot) {
-    // Reference shot: nothing to rotate from yet.
-    if (!spinAligned) { spinAligned = true; refreshReady(); }
-    lastSpinAligned = null;
-    return;
-  }
-
-  const diff = angleDiff(displayYaw, target);
-
-  const half = 97;
-  const range = yawStep(); // gauge spans one step: just shot at the edge, target at the centre
-  const clamped = Math.max(-range, Math.min(range, diff));
-  const offset = (clamped / range) * half;
-  spinBubble.style.transform = `translate(calc(-50% + ${offset.toFixed(1)}px), -50%)`;
-
-  const deg = Math.round(-diff * ROTATION_SIGN); // degrees still to go, counting down to 0
-  if (deg !== lastSpinShown) {
-    spinDeg.textContent = (deg > 0 ? "+" : "") + deg + "°";
-    lastSpinShown = deg;
-  }
-
-  const aligned = Math.abs(diff) <= YAW_TOLERANCE;
-  if (aligned !== lastSpinAligned) {
-    spin.classList.toggle("aligned", aligned);
-    spinAligned = aligned;
-    refreshReady();
-    lastSpinAligned = aligned;
-  }
+  // Reference shot: nothing to rotate from yet.
+  spinAligned = target === null || displayYaw === null || currentShot === refShot
+      || Math.abs(angleDiff(displayYaw, target)) <= YAW_TOLERANCE;
+  refreshReady();
 }
 
 // No sensor: the shutter stays lit, and the dome becomes a progress map without cursor.
-export function hideGauges() {
-  tilt.classList.add("hidden");
-  spin.classList.add("hidden");
+export function waiveAlignment() {
   tiltAligned = spinAligned = true;
   refreshReady();
 }
@@ -139,8 +89,6 @@ export function updateHUD() {
     captureBtn.classList.add("hidden");
     stitchBtn.classList.remove("hidden");
     exportBtn.classList.remove("hidden");
-    tilt.classList.add("hidden");
-    spin.classList.add("hidden");
     return;
   }
 
@@ -155,6 +103,4 @@ export function updateHUD() {
       : currentShot === refShot && gyroActive
       ? "Aim where your last photo was, then tap to recalibrate"
       : (gyroActive ? "Rotate right to the green ring" : `Rotate ~${yawStep()}° right (no sensor)`);
-
-  spin.classList.toggle("hidden", !gyroActive || currentShot === refShot);
 }
