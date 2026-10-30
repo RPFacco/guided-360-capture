@@ -130,18 +130,17 @@ html, body {
   text-align: center;
   text-shadow: 0 1px 4px rgba(0,0,0,0.7);
   min-height: 1.4em;
+  margin-bottom: 8px;
 }
 
-.capture-btn {
-  width: 74px; height: 74px;
-  border-radius: 50%;
-  background: #fff;
-  border: 5px solid rgba(255,255,255,0.45);
-  cursor: pointer;
-  transition: border-color 0.15s ease, transform 0.1s ease;
+.undo-btn {
+  background: var(--panel);
+  border: 2px solid var(--accent);
+  padding: 11px 21px;
+  font-size: 1rem;
 }
-.capture-btn:active { transform: scale(0.92); }
-.capture-btn.ready { border-color: var(--ok); }
+.undo-btn.recal { background: var(--accent); }
+.undo-btn:disabled { opacity: 0.4; border-color: var(--track); }
 
 .flash {
   position: absolute;

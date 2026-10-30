@@ -1,6 +1,6 @@
 import {
   TOTAL_SHOTS, LEVEL_TARGETS, LEVEL_SHOTS, photos, headingLost, isDone, resetSession, restoreSession,
-  anchorHeading, loseHeading, recalibrate, shotFailed, shotTaken,
+  anchorHeading, loseHeading, recalibrate, shotFailed, shotTaken, undoShot,
 } from "./session.js";
 import {
   gyroActive, gotOrientation, rawPitch, rawYaw, displayPitch, displayYaw,
@@ -8,19 +8,20 @@ import {
   captureRotation,
 } from "./orientation.js";
 import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
-import { updateTilt, updateSpin, waiveAlignment, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
+import { updateTilt, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
 import { holdProgress, updateAutoShot } from "./autoshot.js";
-import { openStorage, savePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
+import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
 import { stitchCapture } from "./library.js";
 
 const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
 const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("error");
-const captureBtn = $("capture-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
+const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const flash = $("flash");
+const exportLabel = exportBtn.textContent;
 
 let running = false;
 let busy = false;
@@ -100,7 +101,6 @@ async function begin(resume) {
 
 function noSensor() {
   stopOrientation();
-  waiveAlignment();
   updateHUD();
 }
 
@@ -145,10 +145,7 @@ function renderLoop(now) {
   if (!running) return;
   smoothOrientation();
   if (gyroActive && rawPitch !== null) updateTilt(displayPitch);
-  if (gyroActive && rawYaw !== null) {
-    anchorHeading(displayYaw);
-    updateSpin();
-  }
+  if (gyroActive && rawYaw !== null) anchorHeading(displayYaw);
   if (updateAutoShot(now, busy)) shoot();
   drawDome();
   if (!hasVFC) drawTargets(holdProgress);
@@ -156,8 +153,8 @@ function renderLoop(now) {
   requestAnimationFrame(renderLoop);
 }
 
-captureBtn.addEventListener("click", () => {
-  if (busy || isDone()) return;
+undoBtn.addEventListener("click", () => {
+  if (busy) return;
 
   // Recalibration: aimed back at the last photo, so no photo is taken.
   if (headingLost() && gyroActive && rawYaw !== null) {
@@ -165,7 +162,13 @@ captureBtn.addEventListener("click", () => {
     updateHUD();
     return;
   }
-  shoot();
+  if (!photos.length) return;
+  if (isDone()) {
+    exportBtn.disabled = false;
+    exportBtn.textContent = exportLabel;
+  }
+  deletePhoto(undoShot());
+  updateHUD();
 });
 
 async function shoot() {
@@ -175,17 +178,17 @@ async function shoot() {
   flash.classList.add("animate");
   setTimeout(() => flash.classList.remove("animate"), 180);
 
-  captureBtn.disabled = true;
+  undoBtn.disabled = true;
   let blob = null;
   try {
     blob = await capturePhoto();
   } catch (_) {}
-  captureBtn.disabled = false;
+  undoBtn.disabled = !photos.length;
   busy = false;
 
   if (!blob) {
     shotFailed();
-    setPrompt("Frame dropped - tap again.");
+    setPrompt("Frame dropped - hold still to try again.");
     return;
   }
 
