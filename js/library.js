@@ -259,11 +259,9 @@ async function keepScreenOn() {
 async function upload(file) {
   const progress = (fraction) => setMessage(`Uploading… ${Math.round(fraction * 100)}%. Keep this screen open.`);
   progress(0);
-  const body = new FormData();
-  body.append("file", file, file.name || "360_photos.zip");
   const lock = await keepScreenOn();
   try {
-    const status = await apiUpload("/api/panoramas", body, progress);
+    const status = await apiUpload(file, progress);
     if (status === 201) setMessage("Uploaded. You can close the app now: stitching takes about 6 minutes.");
     else if (status === 400) setMessage("That file is not a capture .zip.");
     else if (status === 413) setMessage("The file is over 300 MB.");
