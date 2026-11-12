@@ -4,6 +4,8 @@ export const API_URL = LOCAL_HOSTS.includes(location.hostname)
   ? "http://localhost:5000"
   : "https://pano.rodrigoappelt.com.br";
 
+export const GOOGLE_CLIENT_ID = "707159799755-3juiktrdcn90ir50aon2o4pm7itfu229.apps.googleusercontent.com";
+
 const TOKEN_KEY = "guided-360-token";
 
 export class AuthError extends Error {}

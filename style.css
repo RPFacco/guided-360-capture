@@ -181,6 +181,7 @@ html, body {
   user-select: text;
 }
 #login .btn[type="submit"] { width: 100%; margin-top: 0.25rem; }
+#google-btn { display: flex; justify-content: center; min-height: 44px; margin-top: 0.75rem; }
 #login .error { color: #ff8080; }
 
 #library {
