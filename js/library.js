@@ -103,6 +103,7 @@ async function signInWithGoogle({ credential }) {
   showLoginError("");
   try {
     const res = await postJson("/api/auth/google", { credential });
+    if (res.status === 409) return showLoginError("This email already has an account with a password. Sign in with it.");
     if (!res.ok) return showLoginError(`Google sign-in failed (${res.status}).`);
     setToken((await res.json()).token);
   } catch (_) {
