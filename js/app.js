@@ -15,7 +15,7 @@ import { holdProgress, updateAutoShot } from "./autoshot.js";
 import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
 import { stitchCapture } from "./library.js";
-import { startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
+import { resetVoice, startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
@@ -31,7 +31,7 @@ let busy = false;
 let storedCount = 0; // photos an earlier page left behind, from shot 1 with no gaps
 let restartArmed = false;
 let wakeLock = null;
-let pendingResume = false; // the start waiting on the volume notice
+let waiting = false; // the camera is open, the volume notice not yet answered
 
 const dbReady = openStorage().then((n) => {
   storedCount = n;
@@ -41,20 +41,7 @@ const dbReady = openStorage().then((n) => {
   }
 });
 
-// The notice's own button starts the capture, so iOS still gets a tap for the
-// gyroscope and the audio.
-function askVolume(resume) {
-  if (voiceMuted()) return begin(resume);
-  pendingResume = resume;
-  volumeDialog.showModal();
-}
-
-volumeOk.addEventListener("click", () => {
-  volumeDialog.close();
-  begin(pendingResume);
-});
-
-startBtn.addEventListener("click", () => askVolume(true));
+startBtn.addEventListener("click", () => begin(true));
 
 // Two taps rather than confirm(): a modal between the tap and requestPermission could
 // cost iOS the user gesture it insists on.
@@ -64,17 +51,16 @@ restartBtn.addEventListener("click", () => {
     restartBtn.textContent = `Toque de novo para descartar ${storedCount} fotos`;
     return;
   }
-  askVolume(false);
+  begin(false);
 });
 
 async function begin(resume) {
   errorEl.classList.add("hidden");
   startBtn.disabled = restartBtn.disabled = true;
+  resetVoice();
 
-  // Before anything else is awaited: iOS only grants orientation and audio from inside the tap.
-  const gyro = requestGyro();
-  startVoice(!(resume && storedCount));
-  await gyro;
+  // Before anything else is awaited: iOS only grants orientation from inside the tap.
+  await requestGyro();
 
   await dbReady;
   resetSession();
@@ -95,7 +81,6 @@ async function begin(resume) {
     errorEl.textContent = "Erro na câmera: " + err.message + " (precisa de uma página HTTPS)";
     errorEl.classList.remove("hidden");
     startBtn.disabled = restartBtn.disabled = false;
-    stopVoice();
     return;
   }
 
@@ -117,7 +102,29 @@ async function begin(resume) {
   updatePerf();
   probeStillFov();
   requestAnimationFrame(renderLoop);
+
+  // Photos and voice wait for this notice, so they start once the phone is in hand.
+  if (voiceMuted()) {
+    startVoice(false);
+  } else {
+    waiting = true;
+    volumeOk.textContent = photos.length ? "Retomar" : "Começar";
+    volumeDialog.showModal();
+  }
 }
+
+// From the tap itself: iOS only starts audio inside one.
+function startShooting() {
+  if (!waiting) return;
+  waiting = false;
+  startVoice(!photos.length);
+}
+
+volumeOk.addEventListener("click", () => {
+  startShooting();
+  volumeDialog.close();
+});
+volumeDialog.addEventListener("close", startShooting); // Esc or the back button
 
 function noSensor() {
   stopOrientation();
@@ -181,7 +188,7 @@ function renderLoop(now) {
   smoothOrientation();
   if (gyroActive && rawPitch !== null) updateTilt(displayPitch);
   if (gyroActive && rawYaw !== null) anchorHeading(displayYaw);
-  if (updateAutoShot(now, busy)) shoot();
+  if (updateAutoShot(now, busy || waiting)) shoot();
   drawDome();
   if (!hasVFC) drawTargets(holdProgress);
   countFrame(now);
