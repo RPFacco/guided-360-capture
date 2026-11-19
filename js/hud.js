@@ -12,7 +12,7 @@ export const YAW_TOLERANCE = 6;
 const $ = (id) => document.getElementById(id);
 const progressFill = $("progress-fill");
 const levelLabel = $("level-label"), shotCounter = $("shot-label");
-const prompt = $("prompt");
+const prompt = $("prompt"), repeatBtn = $("repeat-btn");
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const perf = $("perf");
 
@@ -44,10 +44,9 @@ export function countFrame(now) {
   updatePerf();
 }
 
-// The prompt is also the repeat button for its spoken hint.
 function hint(name) {
   say(name);
-  prompt.disabled = name === null;
+  repeatBtn.classList.toggle("hidden", name === null);
 }
 
 export function setPrompt(text, name) {

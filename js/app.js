@@ -21,7 +21,8 @@ const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
 const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("error");
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
-const promptBtn = $("prompt"), voiceBtn = $("voice-btn");
+const repeatBtn = $("repeat-btn"), voiceBtn = $("voice-btn");
+const volumeDialog = $("volume-dialog"), volumeOk = $("volume-ok");
 const flash = $("flash");
 const exportLabel = exportBtn.textContent;
 
@@ -30,6 +31,7 @@ let busy = false;
 let storedCount = 0; // photos an earlier page left behind, from shot 1 with no gaps
 let restartArmed = false;
 let wakeLock = null;
+let pendingResume = false; // the start waiting on the volume notice
 
 const dbReady = openStorage().then((n) => {
   storedCount = n;
@@ -39,7 +41,20 @@ const dbReady = openStorage().then((n) => {
   }
 });
 
-startBtn.addEventListener("click", () => begin(true));
+// The notice's own button starts the capture, so iOS still gets a tap for the
+// gyroscope and the audio.
+function askVolume(resume) {
+  if (voiceMuted()) return begin(resume);
+  pendingResume = resume;
+  volumeDialog.showModal();
+}
+
+volumeOk.addEventListener("click", () => {
+  volumeDialog.close();
+  begin(pendingResume);
+});
+
+startBtn.addEventListener("click", () => askVolume(true));
 
 // Two taps rather than confirm(): a modal between the tap and requestPermission could
 // cost iOS the user gesture it insists on.
@@ -49,7 +64,7 @@ restartBtn.addEventListener("click", () => {
     restartBtn.textContent = `Toque de novo para descartar ${storedCount} fotos`;
     return;
   }
-  begin(false);
+  askVolume(false);
 });
 
 async function begin(resume) {
@@ -155,7 +170,7 @@ voiceBtn.addEventListener("click", () => {
   toggleVoice();
   showVoice();
 });
-promptBtn.addEventListener("click", () => repeatVoice(!photos.length));
+repeatBtn.addEventListener("click", () => repeatVoice(!photos.length));
 
 window.addEventListener("resize", () => { if (running) initTargets(); });
 

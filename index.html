@@ -82,7 +82,8 @@
   <canvas id="dome" class="dome" aria-hidden="true"></canvas>
 
   <footer class="hud-bottom">
-    <button id="prompt" class="prompt" disabled>Incline até o alvo</button>
+    <p id="prompt" class="prompt">Incline até o alvo</p>
+    <button id="repeat-btn" class="repeat-btn hidden">Repetir voz</button>
     <button id="stitch-btn" class="btn hidden">Costurar panorama</button>
     <button id="export-btn" class="btn hidden">Baixar as 38 fotos (.zip)</button>
     <button id="undo-btn" class="btn undo-btn" disabled>Desfazer última foto</button>
@@ -90,6 +91,12 @@
 
   <div id="flash" class="flash"></div>
 </section>
+
+<dialog id="volume-dialog" class="dialog" aria-labelledby="volume-title">
+  <h2 id="volume-title">Aumente o volume</h2>
+  <p>A captura tem instruções por voz. Aumente o volume e tire o celular do modo silencioso.</p>
+  <button id="volume-ok" class="btn">Entendi</button>
+</dialog>
 
 <script src="https://accounts.google.com/gsi/client" defer></script>
 <script type="module" src="js/app.js"></script>

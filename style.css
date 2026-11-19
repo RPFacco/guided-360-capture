@@ -22,6 +22,7 @@
   --i-replay: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M3.5 12A8.5 8.5 0 1 0 6 6'/%3E%3Cpath d='M6 1.5V6h4.5'/%3E%3C/svg%3E");
   --i-sound: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.5l4.5-4v13l-4.5-4H4z'/%3E%3Cpath d='M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11'/%3E%3C/svg%3E");
   --i-mute: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.5l4.5-4v13l-4.5-4H4z'/%3E%3Cpath d='M16 9.5l5 5M21 9.5l-5 5'/%3E%3C/svg%3E");
+  --i-volume: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9.5h3.5l4.5-4v13l-4.5-4H4z'/%3E%3Cpath d='M15.5 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11'/%3E%3C/svg%3E");
   --i-upload: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 15V4M7 9l5-5 5 5M4 20h16'/%3E%3C/svg%3E");
 }
 
@@ -477,37 +478,64 @@ button, label { cursor: pointer; }
   padding: 14px 16px calc(env(safe-area-inset-bottom) + 18px);
   background: var(--olive);
 }
-/* Also the repeat button for the spoken hint. */
 .prompt {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  width: 100%;
   min-height: 1.4em;
-  border: none;
-  background: none;
   font-size: 0.95rem;
   font-weight: 500;
   text-align: center;
   text-wrap: balance;
 }
-.prompt::before {
+.repeat-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  margin-top: -4px;
+  padding: 0 14px 0 12px;
+  border: none;
+  border-radius: 17px;
+  background: rgba(255, 255, 255, 0.16);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+.repeat-btn::before {
   content: "";
-  flex: none;
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   background: currentColor;
   -webkit-mask: var(--i-replay) center / contain no-repeat;
   mask: var(--i-replay) center / contain no-repeat;
 }
-.prompt:disabled { cursor: default; }
-.prompt:disabled::before { display: none; }
+.repeat-btn:active { background: rgba(255, 255, 255, 0.28); }
 #stitch-btn, #export-btn { width: 100%; }
 #stitch-btn { background: var(--action); color: var(--fg); box-shadow: none; }
 #export-btn, .undo-btn { background: transparent; color: #fff; box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.7); }
 .undo-btn.recal { background: var(--action); color: var(--fg); box-shadow: none; }
 .undo-btn:disabled { opacity: 0.4; }
+
+.dialog {
+  width: min(340px, calc(100% - 48px));
+  margin: auto;
+  padding: 24px 24px 20px;
+  border: none;
+  border-radius: 8px;
+  color: var(--fg);
+  text-align: center;
+  box-shadow: var(--fab-shadow);
+}
+.dialog::backdrop { background: rgba(0, 0, 0, 0.5); }
+.dialog::before {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 14px;
+  border-radius: 50%;
+  background: var(--i-volume) center / 30px no-repeat, var(--olive);
+}
+.dialog h2 { font: 400 1.3rem/1.2 var(--display); }
+.dialog p { margin: 10px 0 20px; color: rgba(0, 0, 0, 0.6); font-size: 0.95rem; line-height: 1.5; }
+.dialog .btn { width: 100%; }
 
 .flash {
   position: absolute;
