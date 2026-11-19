@@ -2,6 +2,7 @@ import { LEVEL_TARGETS, LEVEL_SHOTS, TOTAL_SHOTS, shotsBefore, currentLevel, cur
 import { gyroActive } from "./orientation.js";
 import { hasVFC, frameSeq, previewLabel, exposureLabel, shotW, shotH } from "./camera.js";
 import { drawDomeBase } from "./dome.js";
+import { say } from "./voice.js";
 
 const TOLERANCE = 5;
 // 6 degrees of slop still leaves the neighbours overlapping by over a third on a
@@ -43,8 +44,15 @@ export function countFrame(now) {
   updatePerf();
 }
 
-export function setPrompt(text) {
+// The prompt is also the repeat button for its spoken hint.
+function hint(name) {
+  say(name);
+  prompt.disabled = name === null;
+}
+
+export function setPrompt(text, name) {
   prompt.textContent = text;
+  hint(name);
 }
 
 export function updateTilt(pitch) {
@@ -65,7 +73,7 @@ export function updateHUD() {
   if (done >= TOTAL_SHOTS) {
     levelLabel.textContent = "Pronto";
     shotCounter.textContent = photos.length + " fotos";
-    prompt.textContent = "Tudo pronto. Costure o panorama ou baixe as fotos.";
+    setPrompt("Tudo pronto. Costure o panorama ou baixe as fotos.", "pronto");
     stitchBtn.classList.remove("hidden");
     exportBtn.classList.remove("hidden");
     return;
@@ -77,11 +85,14 @@ export function updateHUD() {
   const tiltText = `${t > 0 ? "+" : ""}${t}°`;
   levelLabel.textContent = `Nível ${currentLevel + 1} de ${LEVEL_TARGETS.length} (${tiltText})`;
   shotCounter.textContent = `Foto ${currentShot + 1} de ${LEVEL_SHOTS[currentLevel]}`;
-  prompt.textContent = currentShot === 0
-      ? (!gyroActive ? `Aponte a ~${tiltText} (sem sensor)`
-          : LEVEL_SHOTS[currentLevel] > 1 ? `Incline até ${tiltText} e mire no anel verde`
-          : `Incline o celular até ${tiltText}`)
-      : recal
-      ? "Aponte para onde estava a última foto e toque em Recalibrar"
-      : (gyroActive ? "Gire para a direita até o anel verde" : `Gire ~${yawStep()}° para a direita (sem sensor)`);
+  if (!gyroActive) {
+    setPrompt(currentShot === 0 ? `Aponte a ~${tiltText} (sem sensor)` : `Gire ~${yawStep()}° para a direita (sem sensor)`, null);
+  } else if (currentShot === 0) {
+    setPrompt(LEVEL_SHOTS[currentLevel] > 1 ? `Incline até ${tiltText} e mire no anel verde`
+        : `Incline o celular até ${tiltText}`, `nivel-${currentLevel + 1}`);
+  } else if (recal) {
+    setPrompt("Aponte para onde estava a última foto e toque em Recalibrar", "recalibrar");
+  } else {
+    setPrompt("Gire para a direita até o anel verde", "gire");
+  }
 }

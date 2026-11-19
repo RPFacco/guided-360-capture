@@ -15,11 +15,13 @@ import { holdProgress, updateAutoShot } from "./autoshot.js";
 import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
 import { stitchCapture } from "./library.js";
+import { startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
 const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("error");
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
+const promptBtn = $("prompt"), voiceBtn = $("voice-btn");
 const flash = $("flash");
 const exportLabel = exportBtn.textContent;
 
@@ -54,8 +56,10 @@ async function begin(resume) {
   errorEl.classList.add("hidden");
   startBtn.disabled = restartBtn.disabled = true;
 
-  // Before anything else is awaited: iOS only grants orientation from inside the tap.
-  await requestGyro();
+  // Before anything else is awaited: iOS only grants orientation and audio from inside the tap.
+  const gyro = requestGyro();
+  startVoice(!(resume && storedCount));
+  await gyro;
 
   await dbReady;
   resetSession();
@@ -76,6 +80,7 @@ async function begin(resume) {
     errorEl.textContent = "Erro na câmera: " + err.message + " (precisa de uma página HTTPS)";
     errorEl.classList.remove("hidden");
     startBtn.disabled = restartBtn.disabled = false;
+    stopVoice();
     return;
   }
 
@@ -113,6 +118,7 @@ function leaveCapture() {
   running = false;
   stopOrientation();
   stopCamera();
+  stopVoice();
   wakeLock?.release().catch(() => {});
   wakeLock = null;
 
@@ -130,12 +136,26 @@ document.addEventListener("visibilitychange", () => {
     // Relative yaw may restart while hidden, same as a reload.
     loseHeading(busy);
     forgetHeading();
+    stopVoice();
     updateHUD();
     return;
   }
   resumePreview();
   keepAwake();
+  resumeVoice();
 });
+
+function showVoice() {
+  voiceBtn.classList.toggle("off", voiceMuted());
+  voiceBtn.setAttribute("aria-label", voiceMuted() ? "Ligar voz" : "Desligar voz");
+}
+showVoice();
+
+voiceBtn.addEventListener("click", () => {
+  toggleVoice();
+  showVoice();
+});
+promptBtn.addEventListener("click", () => repeatVoice(!photos.length));
 
 window.addEventListener("resize", () => { if (running) initTargets(); });
 
@@ -188,7 +208,7 @@ async function shoot() {
 
   if (!blob) {
     shotFailed();
-    setPrompt("A foto falhou - segure parado para tentar de novo.");
+    setPrompt("A foto falhou - segure parado para tentar de novo.", "falhou");
     return;
   }
 
