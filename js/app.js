@@ -5,13 +5,13 @@ import {
 import {
   gyroActive, gotOrientation, rawPitch, rawYaw, displayPitch, displayYaw,
   requestGyro, startOrientation, stopOrientation, smoothOrientation, forgetHeading,
-  captureRotation,
+  captureRotation, rawRotation, rotationAngle,
 } from "./orientation.js";
 import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
 import { updateTilt, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
-import { holdProgress, updateAutoShot } from "./autoshot.js";
+import { holdProgress, updateAutoShot, STILL_DEG } from "./autoshot.js";
 import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
 import { stitchCapture } from "./library.js";
@@ -23,8 +23,9 @@ const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("err
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const repeatBtn = $("repeat-btn"), voiceBtn = $("voice-btn");
 const volumeDialog = $("volume-dialog"), volumeOk = $("volume-ok");
-const flash = $("flash");
+const flash = $("flash"), holding = $("holding");
 const exportLabel = exportBtn.textContent;
+const HOLDING_DELAY_MS = 150; // quicker captures (iOS) never show the hold notice
 
 let running = false;
 let busy = false;
@@ -32,6 +33,8 @@ let storedCount = 0; // photos an earlier page left behind, from shot 1 with no 
 let restartArmed = false;
 let wakeLock = null;
 let waiting = false; // the camera is open, the volume notice not yet answered
+let shotStart = null; // rotation at the shutter, until the picture is fixed
+let shotDrift = 0;    // furthest the phone got from it meanwhile, degrees
 
 const dbReady = openStorage().then((n) => {
   storedCount = n;
@@ -188,6 +191,7 @@ function renderLoop(now) {
   smoothOrientation();
   if (gyroActive && rawPitch !== null) updateTilt(displayPitch);
   if (gyroActive && rawYaw !== null) anchorHeading(displayYaw);
+  if (shotStart && rawRotation) shotDrift = Math.max(shotDrift, rotationAngle(shotStart, rawRotation));
   if (updateAutoShot(now, busy || waiting)) shoot();
   drawDome();
   if (!hasVFC) drawTargets(holdProgress);
@@ -213,24 +217,43 @@ undoBtn.addEventListener("click", () => {
   updateHUD();
 });
 
+// Android's takePhoto freezes the preview for up to a second. The flash waits for the
+// picture, and until then the screen says to hold still: moving in between spoils it.
 async function shoot() {
   busy = true;
   const rotation = captureRotation(); // the capture can take a second, and the phone moves on
-
-  flash.classList.add("animate");
-  setTimeout(() => flash.classList.remove("animate"), 180);
+  shotStart = rawRotation;
+  shotDrift = 0;
+  let fixed = false, moved = false;
+  const holdTimer = setTimeout(() => holding.classList.remove("hidden"), HOLDING_DELAY_MS);
+  const settle = () => {
+    clearTimeout(holdTimer);
+    holding.classList.add("hidden");
+    shotStart = null;
+  };
+  const exposed = () => {
+    if (fixed) return;
+    fixed = true;
+    moved = shotDrift > STILL_DEG;
+    settle();
+    if (moved) return;
+    flash.classList.add("animate");
+    setTimeout(() => flash.classList.remove("animate"), 180);
+    if (navigator.vibrate) navigator.vibrate(30);
+  };
 
   undoBtn.disabled = true;
   let blob = null;
   try {
-    blob = await capturePhoto();
+    blob = await capturePhoto(exposed);
   } catch (_) {}
+  settle();
   undoBtn.disabled = !photos.length;
   busy = false;
 
-  if (!blob) {
+  if (!blob || moved) {
     shotFailed();
-    setPrompt("A foto falhou - segure parado para tentar de novo.", "falhou");
+    setPrompt(moved ? "O celular mexeu - segure parado para tentar de novo." : "A foto falhou - segure parado para tentar de novo.", "falhou");
     return;
   }
 

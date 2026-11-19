@@ -1,19 +1,19 @@
 import { exifFromBlob, fovFromFocal, assumedFov } from "./fov.js";
 
-// Safari ships takePhoto but it reconfigures the capture session on every shot: the
-// preview goes black and each still allocates a sensor-sized buffer that kills the
-// tab after a handful. Canvas on iOS, real stills everywhere else.
+// takePhoto reconfigures the capture session on every shot: on iOS the preview goes
+// black and each still allocates a sensor-sized buffer that kills the tab after a
+// handful, on Android the preview freezes for up to a second. So every photo is a
+// canvas grab of the preview frame.
 const IS_IOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
     (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-const USE_STILL = !IS_IOS && ("ImageCapture" in window);
 
 const JPEG_QUALITY = 0.92;
 const SHOT_AR = 3 / 4;  // width/height, in portrait
-const LONG_EDGE = 4032; // canvas path only: the photo is the whole preview frame, up to 12MP
+const LONG_EDGE = 4032; // the photo is the whole preview frame, up to 12MP
 
 // Measured on a Xiaomi (Android 16): the still menu holds 2448x3264, 1920x2560 and
 // 1440x1920 at a true 3:4, plus a 2256x4000 16:9 that is the DEFAULT and crops 25%
-// off the width. So always ask for a size - never take takePhoto()'s default.
+// off the width. So the lens probe asks for a size - never takePhoto()'s default.
 const STILL_SETTINGS = { imageWidth: 3264, imageHeight: 2448 };
 
 const EXPOSURE_SETTLE_MS = 800;
@@ -21,7 +21,6 @@ const EXPOSURE_MAX_CHANGE = 0.25;
 
 const video = document.getElementById("video");
 let stream = null;
-let imageCapture = null;
 let frameLoopGen = 0;
 let frameListener = () => {};
 let exposureReady = Promise.resolve();
@@ -46,10 +45,10 @@ export function onFrame(listener) {
 // applyConstraints can lower a resolution but never raise it, so each rung is a fresh
 // getUserMedia.
 //
-// With a real still the preview is only a viewfinder, so take the lightest 3:4 track.
-// Without one the photo IS a preview frame, so take the biggest, down from 12MP.
+// The photo IS a preview frame, so iOS takes the biggest, down from 12MP. Android
+// starts at 1440: the stitch shrinks every photo to 1440x1920 anyway.
 function shortEdgeLadder() {
-  return USE_STILL ? [1080, 960, 1200, 1440, 1920] : [3024, 2448, 1920, 1440, 1080];
+  return IS_IOS ? [3024, 2448, 1920, 1440, 1080] : [1440, 1920, 1080];
 }
 
 // A track can answer the right size with the wrong shape - {height: exact 720} came
@@ -66,8 +65,6 @@ export function stopCamera() {
 
 export async function startCamera() {
   stopCamera();
-
-  imageCapture = null;
 
   const face = { ideal: "environment" };
   let lastErr = null;
@@ -97,11 +94,6 @@ export async function startCamera() {
 
   video.srcObject = stream;
   const track = stream.getVideoTracks()[0];
-
-  if (USE_STILL) {
-    try { imageCapture = new ImageCapture(track); } catch (_) {}
-  }
-
   const s2 = track.getSettings();
   previewLabel = s2.width + "×" + s2.height;
   await video.play().catch(() => {});
@@ -202,24 +194,6 @@ async function recoverPreview() {
   try { await startCamera(); } catch (_) {}
 }
 
-// Read the JPEG frame header rather than decoding: createImageBitmap on an 8MP still,
-// once per shot, is the allocation pattern that kills a mobile tab.
-async function jpegSize(blob) {
-  try {
-    const b = new Uint8Array(await blob.slice(0, 65536).arrayBuffer());
-    let i = 2;
-    while (i < b.length - 9) {
-      if (b[i] !== 0xFF) { i++; continue; }
-      const m = b[i + 1];
-      if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) {
-        return { h: (b[i + 5] << 8) | b[i + 6], w: (b[i + 7] << 8) | b[i + 8] };
-      }
-      i += 2 + ((b[i + 2] << 8) | b[i + 3]);
-    }
-  } catch (_) {}
-  return null;
-}
-
 async function setShotFov(blob) {
   if (probePromise) await probePromise;
   const exif = await exifFromBlob(blob);
@@ -233,17 +207,17 @@ async function setShotFov(blob) {
   shotFov = { ...base, width: w, height: h, orientation };
 }
 
-// iOS canvas grabs have no EXIF, so take a single throwaway still up front just to read
+// Canvas grabs have no EXIF, so take a single throwaway still up front just to read
 // the lens. It reconfigures the capture session once, which the canvas path can survive;
-// the per-shot takePhoto is what kills the tab. Best effort, never blocks the run.
+// the per-shot takePhoto is what kills the tab on iOS. Best effort, never blocks the run.
 export function probeStillFov() {
-  if (probePromise || !IS_IOS || !("ImageCapture" in window) || !stream) return probePromise;
+  if (probePromise || !("ImageCapture" in window) || !stream) return probePromise;
   probePromise = (async () => {
     let probe = null;
     try { probe = new ImageCapture(stream.getVideoTracks()[0]); } catch (_) { return; }
     try {
       const blob = await Promise.race([
-        probe.takePhoto(),
+        IS_IOS ? probe.takePhoto() : probe.takePhoto(STILL_SETTINGS),
         new Promise((res) => setTimeout(() => res(null), 4000)),
       ]);
       if (blob) {
@@ -262,27 +236,9 @@ export function probeStillFov() {
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
 
-export async function capturePhoto() {
+// exposed() runs once the picture is fixed: from then on the phone may move.
+export async function capturePhoto(exposed) {
   await exposureReady;
-  if (imageCapture) {
-    try {
-      const blob = await imageCapture.takePhoto(STILL_SETTINGS);
-      // takePhoto drops the compositing layer on Android too, same as the canvas grab.
-      await recoverPreview();
-      // STILL_SETTINGS is a request, not a promise: a device that ignores it can
-      // hand back its 16:9 default. Checking beats shipping a pack of mixed shapes.
-      const d = await jpegSize(blob);
-      if (!d || isPhotoShaped({ width: d.w, height: d.h })) {
-        shotW = d ? d.w : 0;
-        shotH = d ? d.h : 0;
-        await setShotFov(blob);
-        return blob;
-      }
-      imageCapture = null; // wrong shape: the canvas crops reliably, use it instead
-    } catch (_) {
-      imageCapture = null; // one strike: canvas for the rest of the run
-    }
-  }
 
   // Never grab a stale frame: mid-recovery the preview draws black.
   if (video.paused) await video.play().catch(() => {});
@@ -310,6 +266,7 @@ export async function capturePhoto() {
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
+  exposed();
   shotW = w;
   shotH = h;
 
