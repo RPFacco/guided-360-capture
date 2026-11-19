@@ -29,7 +29,7 @@ let exposureReady = Promise.resolve();
 export const hasVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
 export let frameSeq = 0;
 export let previewLabel = "…";
-export let exposureLabel = "auto";
+export let exposureLabel = "automática";
 export let shotW = 0, shotH = 0;
 export let shotFov = null;
 let probedFov = null;
@@ -125,7 +125,7 @@ function meanLuma() {
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
 async function lockExposure(track) {
-  exposureLabel = "auto";
+  exposureLabel = "automática";
   const modes = !IS_IOS && track.getCapabilities ? track.getCapabilities().exposureMode : null;
   if (!modes || !modes.includes("manual")) return;
 
@@ -142,10 +142,10 @@ async function lockExposure(track) {
   await wait(EXPOSURE_SETTLE_MS);
   if (Math.abs(meanLuma() - before) > before * EXPOSURE_MAX_CHANGE) {
     await track.applyConstraints({ advanced: [{ exposureMode: "continuous" }] }).catch(() => {});
-    exposureLabel = "auto (lock changed brightness)";
+    exposureLabel = "automática (travar mudou o brilho)";
     return;
   }
-  exposureLabel = "locked";
+  exposureLabel = "travada";
 }
 
 // Re-attaching srcObject cancels any pending requestVideoFrameCallback, so the loop

@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <meta name="theme-color" content="#4d6339">
-  <title>Guided 360 Capture</title>
+  <title>Captura 360 guiada</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto+Mono&family=Roboto:wght@400;500&family=Source+Sans+3&display=swap">
@@ -15,12 +15,12 @@
 <section id="intro" class="screen active">
   <div class="intro-box">
     <img class="intro-art" src="dome.png" alt="" width="300" height="300">
-    <h1>360 Capture</h1>
-    <p>38 photos on 5 tilt levels: 1 straight up, 10 at +45°, 16 at 0°, 10 at −45° and 1 straight down. Hold the phone upright (portrait).</p>
+    <h1>Captura 360</h1>
+    <p>38 fotos em 5 níveis de inclinação: 1 apontando para cima, 10 a +45°, 16 a 0°, 10 a −45° e 1 apontando para baixo. Segure o celular em pé (retrato).</p>
     <div class="intro-actions">
-      <button id="start-btn" class="btn">Start capture</button>
-      <button id="restart-btn" class="btn secondary hidden">Start over</button>
-      <button id="library-btn" class="btn secondary">My panoramas</button>
+      <button id="start-btn" class="btn">Começar captura</button>
+      <button id="restart-btn" class="btn secondary hidden">Recomeçar</button>
+      <button id="library-btn" class="btn secondary">Meus panoramas</button>
     </div>
     <p id="error" class="error hidden"></p>
   </div>
@@ -28,27 +28,27 @@
 
 <section id="login" class="screen hidden">
   <form id="login-form" class="intro-box">
-    <h1>My panoramas</h1>
-    <p>Sign in to see the panoramas stitched from your captures.</p>
-    <input id="email" type="email" placeholder="Email" autocomplete="email" required>
-    <input id="password" type="password" placeholder="Password (8+ characters)" autocomplete="current-password" minlength="8" required>
-    <button type="submit" class="btn">Sign in</button>
-    <div class="or" aria-hidden="true">or</div>
+    <h1>Meus panoramas</h1>
+    <p>Entre para ver os panoramas costurados a partir das suas capturas.</p>
+    <input id="email" type="email" placeholder="E-mail" autocomplete="email" required>
+    <input id="password" type="password" placeholder="Senha (mínimo 8 caracteres)" autocomplete="current-password" minlength="8" required>
+    <button type="submit" class="btn">Entrar</button>
+    <div class="or" aria-hidden="true">ou</div>
     <div id="google-btn"></div>
-    <button type="button" id="register-btn" class="btn secondary">Create account</button>
-    <button type="button" id="login-back-btn" class="btn secondary">Back</button>
+    <button type="button" id="register-btn" class="btn secondary">Criar conta</button>
+    <button type="button" id="login-back-btn" class="btn secondary">Voltar</button>
     <p id="login-error" class="error hidden"></p>
   </form>
 </section>
 
 <section id="library" class="screen hidden">
   <header class="library-top">
-    <button id="library-back-btn" class="link">← Capture</button>
-    <h1>My panoramas</h1>
-    <button id="logout-btn" class="link">Sign out</button>
+    <button id="library-back-btn" class="link">← Captura</button>
+    <h1>Meus panoramas</h1>
+    <button id="logout-btn" class="link">Sair</button>
   </header>
   <label class="btn upload">
-    Upload capture .zip
+    Enviar .zip da captura
     <input id="zip-input" type="file" accept=".zip,application/zip" hidden>
   </label>
   <p id="library-message" class="library-message hidden"></p>
@@ -59,9 +59,9 @@
   <div id="viewer-stage" class="viewer-stage"></div>
   <header class="viewer-top">
     <button id="viewer-back-btn" class="link">← Panoramas</button>
-    <button id="download-btn" class="link hidden">Download</button>
+    <button id="download-btn" class="link hidden">Baixar</button>
   </header>
-  <button id="sensor-btn" class="btn sensor-btn hidden">Enable sensors</button>
+  <button id="sensor-btn" class="btn sensor-btn hidden">Ativar sensores</button>
   <p id="viewer-message" class="viewer-message hidden"></p>
 </section>
 
@@ -72,8 +72,8 @@
   <header class="hud-top">
     <div class="progress"><div id="progress-fill"></div></div>
     <div class="status">
-      <span id="level-label">Level 1 of 5</span>
-      <span id="shot-label">Shot 1 of 12</span>
+      <span id="level-label">Nível 1 de 5</span>
+      <span id="shot-label">Foto 1 de 12</span>
     </div>
     <div id="perf" class="perf"></div>
   </header>
@@ -81,10 +81,10 @@
   <canvas id="dome" class="dome" aria-hidden="true"></canvas>
 
   <footer class="hud-bottom">
-    <p id="prompt" class="prompt">Tilt to target</p>
-    <button id="stitch-btn" class="btn hidden">Stitch panorama</button>
-    <button id="export-btn" class="btn hidden">Download all 38 photos (.zip)</button>
-    <button id="undo-btn" class="btn undo-btn" disabled>Undo last photo</button>
+    <p id="prompt" class="prompt">Incline até o alvo</p>
+    <button id="stitch-btn" class="btn hidden">Costurar panorama</button>
+    <button id="export-btn" class="btn hidden">Baixar as 38 fotos (.zip)</button>
+    <button id="undo-btn" class="btn undo-btn" disabled>Desfazer última foto</button>
   </footer>
 
   <div id="flash" class="flash"></div>

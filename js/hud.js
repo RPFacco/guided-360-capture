@@ -20,7 +20,7 @@ let shotLabel = "—", fpsText = "…";
 let uiFrames = 0, fpsAt = 0, fpsSeq = 0;
 
 export function updatePerf() {
-  perf.textContent = "FPS " + fpsText + " · Preview " + previewLabel + " · Shot " + shotLabel + " · Exposure " + exposureLabel;
+  perf.textContent = "FPS " + fpsText + " · Prévia " + previewLabel + " · Foto " + shotLabel + " · Exposição " + exposureLabel;
 }
 
 function fmtSize(bytes) {
@@ -58,14 +58,14 @@ export function updateHUD() {
 
   // Heading lost: the same button recalibrates instead.
   const recal = headingLost() && gyroActive;
-  undoBtn.textContent = recal ? "Recalibrate" : "Undo last photo";
+  undoBtn.textContent = recal ? "Recalibrar" : "Desfazer última foto";
   undoBtn.classList.toggle("recal", recal);
   undoBtn.disabled = !recal && !photos.length;
 
   if (done >= TOTAL_SHOTS) {
-    levelLabel.textContent = "Done";
-    shotCounter.textContent = photos.length + " photos";
-    prompt.textContent = "All set. Stitch the panorama or download the photos.";
+    levelLabel.textContent = "Pronto";
+    shotCounter.textContent = photos.length + " fotos";
+    prompt.textContent = "Tudo pronto. Costure o panorama ou baixe as fotos.";
     stitchBtn.classList.remove("hidden");
     exportBtn.classList.remove("hidden");
     return;
@@ -75,13 +75,13 @@ export function updateHUD() {
 
   const t = LEVEL_TARGETS[currentLevel];
   const tiltText = `${t > 0 ? "+" : ""}${t}°`;
-  levelLabel.textContent = `Level ${currentLevel + 1} of ${LEVEL_TARGETS.length} (${tiltText})`;
-  shotCounter.textContent = `Shot ${currentShot + 1} of ${LEVEL_SHOTS[currentLevel]}`;
+  levelLabel.textContent = `Nível ${currentLevel + 1} de ${LEVEL_TARGETS.length} (${tiltText})`;
+  shotCounter.textContent = `Foto ${currentShot + 1} de ${LEVEL_SHOTS[currentLevel]}`;
   prompt.textContent = currentShot === 0
-      ? (!gyroActive ? `Aim ~${tiltText} (no sensor)`
-          : LEVEL_SHOTS[currentLevel] > 1 ? `Tilt to ${tiltText} and aim at the green ring`
-          : `Tilt the phone to ${tiltText}`)
+      ? (!gyroActive ? `Aponte a ~${tiltText} (sem sensor)`
+          : LEVEL_SHOTS[currentLevel] > 1 ? `Incline até ${tiltText} e mire no anel verde`
+          : `Incline o celular até ${tiltText}`)
       : recal
-      ? "Aim where your last photo was, then tap Recalibrate"
-      : (gyroActive ? "Rotate right to the green ring" : `Rotate ~${yawStep()}° right (no sensor)`);
+      ? "Aponte para onde estava a última foto e toque em Recalibrar"
+      : (gyroActive ? "Gire para a direita até o anel verde" : `Gire ~${yawStep()}° para a direita (sem sensor)`);
 }

@@ -1,86 +1,86 @@
-# Guided 360 Capture
+# Captura 360 guiada
 
-A single-page web app that walks you through shooting a 38-photo turntable set with a
-phone: **5 tilt levels** (+90°, +45°, 0°, -45°, -90°) with **1, 10, 16, 10, 1 shots**,
-evenly spaced around each level. Dots pinned to the scene mark where each shot goes, and
-an arrow from the centre ring points to the next one: aim the centre ring at it. At the end it packs every shot into a single `.zip`.
+Um app web de página única que guia você na captura, com o celular, de um conjunto de 38 fotos
+girando no mesmo lugar: **5 níveis de inclinação** (+90°, +45°, 0°, -45°, -90°) com **1, 10, 16,
+10, 1 fotos**, distribuídas por igual em cada nível. Pontos fixos na cena marcam onde vai cada
+foto, e uma seta saindo do anel central aponta para a próxima: mire o anel central nela. No final, ele junta todas as fotos em um único `.zip`.
 
-All photos come out **3:4 portrait**.
+Todas as fotos saem em **retrato 3:4**.
 
 ## Deploy
 
 https://rpfacco.github.io/guided-360-capture/
 
-## Running it
+## Como rodar
 
-The camera and the gyroscope are both gated behind a **secure context**, so the page
-has to be served over HTTPS (or `localhost`). Opening `index.html` from the filesystem
-will not work, and neither will a plain `http://192.168.x.x` LAN address.
+A câmera e o giroscópio só funcionam em um **contexto seguro**, então a página precisa ser
+servida por HTTPS (ou `localhost`). Abrir o `index.html` direto do sistema de arquivos não
+funciona, e um endereço de rede local `http://192.168.x.x` também não.
 
 ```bash
 python -m http.server 8000
 ```
 
-On the same machine, `http://localhost:8000` is enough, `localhost` counts as secure.
-To reach it from a phone you need an HTTPS tunnel, e.g.:
+Na mesma máquina, `http://localhost:8000` basta: `localhost` conta como seguro.
+Para acessar pelo celular você precisa de um túnel HTTPS, por exemplo:
 
 ```bash
 cloudflared tunnel --url http://localhost:8000
 ```
 
-## How capture works
+## Como a captura funciona
 
-Two paths, picked per platform:
+Dois caminhos, escolhidos por plataforma:
 
-| Platform | Preview | Photo |
+| Plataforma | Prévia | Foto |
 |---|---|---|
-| Android / desktop | light stream, ~1080 short edge | `ImageCapture.takePhoto()`, full sensor |
-| iOS | up to 3024×4032 | canvas grab of the preview frame |
+| Android / desktop | stream leve, ~1080 no lado menor | `ImageCapture.takePhoto()`, sensor inteiro |
+| iOS | até 3024×4032 | captura do quadro da prévia num canvas |
 
-On iOS `takePhoto()` reconfigures the capture session on every shot, the preview goes
-black and each still allocates a sensor-sized buffer, which kills the tab after a
-handful of photos. So iOS draws the preview frame to a canvas instead, which means its
-preview has to stay large: there, the photo *is* the preview frame.
+No iOS, o `takePhoto()` reconfigura a sessão de captura a cada foto, a prévia fica preta e
+cada foto aloca um buffer do tamanho do sensor, o que derruba a aba depois de algumas fotos.
+Por isso o iOS desenha o quadro da prévia num canvas, o que significa que a prévia precisa
+continuar grande: lá, a foto *é* o quadro da prévia.
 
-Everywhere else the still comes off a separate pipeline, so the preview is free to be
-small. If `takePhoto()` throws, or returns something that is not 3:4, the app falls
-back to the canvas path for the rest of the run rather than producing a mixed set.
+Nos outros, a foto sai de um pipeline separado, então a prévia pode ser pequena. Se o
+`takePhoto()` der erro, ou devolver algo que não é 3:4, o app passa a usar o canvas pelo
+resto da captura em vez de produzir um conjunto misturado.
 
-## Export
+## Exportação
 
-The `.zip` holds `360_photos/level_NN_shot_NN.jpg` plus a `metadata.json` with, for every
-shot: the target tilt/heading, the camera rotation at the shutter (yaw, pitch, roll and
-the raw 3x3 device-to-world matrix) and the horizontal/vertical/diagonal FOV.
+O `.zip` contém `360_photos/level_NN_shot_NN.jpg` e um `metadata.json` com, para cada foto:
+a inclinação/direção alvo, a rotação da câmera no disparo (yaw, pitch, roll e a matriz 3x3
+bruta do dispositivo para o mundo) e o FOV horizontal/vertical/diagonal.
 
-FOV comes from the still's EXIF `FocalLengthIn35mmFilm` when the device writes it
-(the `takePhoto` path, i.e. Android/desktop). iOS grabs the preview on a canvas, which
-carries no EXIF, so on Safari 18.4+ it takes a single throwaway `takePhoto` at start-up
-just to read the lens (`fov.source` = `exif-probe`); older Safari, or a device that
-strips EXIF, falls back to the assumed ~53 degree horizontal lens (the same constant the
-target overlay uses, `fov.source` = `assumed`). `metadata.json` records the per-shot
-source in `fov.source` and the run-level `fovSource`.
+O FOV vem do `FocalLengthIn35mmFilm` do EXIF da foto quando o aparelho grava esse campo
+(o caminho do `takePhoto`, ou seja, Android/desktop). O iOS captura a prévia num canvas, que
+não tem EXIF, então no Safari 18.4+ ele tira um único `takePhoto` descartável na
+inicialização só para ler a lente (`fov.source` = `exif-probe`); Safari mais antigo, ou um
+aparelho que remove o EXIF, usa a lente assumida de ~53 graus na horizontal (a mesma
+constante que a sobreposição dos alvos usa, `fov.source` = `assumed`). O `metadata.json`
+registra a origem de cada foto em `fov.source` e a da captura inteira em `fovSource`.
 
-## Memory
+## Memória
 
-Each photo is saved to IndexedDB as it is taken instead of being held in memory until
-export. The ZIP is stored, not deflated, because compressing 38 JPEGs in one pass was
-enough on its own to push mobile Safari over its limit. If the export dies, lower
-`STILL_SETTINGS` in `camera.js`.
+Cada foto é salva no IndexedDB assim que é tirada, em vez de ficar na memória até a
+exportação. O ZIP é gravado sem compressão, porque comprimir 38 JPEGs de uma só vez já
+bastava para estourar o limite do Safari no celular. Se a exportação falhar, reduza
+`STILL_SETTINGS` em `camera.js`.
 
-## Files
+## Arquivos
 
 ```
-index.html         markup
-style.css          styling, including the 3:4 preview frame
-js/app.js          start-up and capture flow
-js/session.js      shot layout, progress, heading reference
-js/orientation.js  gyroscope and rotation math
-js/camera.js       preview stream and photo capture
-js/fov.js          EXIF focal-length read and field-of-view math
-js/autoshot.js     automatic shutter
-js/hud.js          alignment and on-screen text
-js/dome.js         coverage dome
-js/targets.js      dots pinned to the scene, arrow to the next
+index.html         marcação
+style.css          estilos, incluindo o quadro de prévia 3:4
+js/app.js          inicialização e fluxo da captura
+js/session.js      distribuição das fotos, progresso, referência de direção
+js/orientation.js  giroscópio e cálculos de rotação
+js/camera.js       stream da prévia e captura das fotos
+js/fov.js          leitura da distância focal no EXIF e cálculo do campo de visão
+js/autoshot.js     disparo automático
+js/hud.js          alinhamento e textos na tela
+js/dome.js         domo de cobertura
+js/targets.js      pontos fixos na cena, seta para o próximo
 js/storage.js      IndexedDB
-js/zip.js          ZIP export
+js/zip.js          exportação ZIP
 ```

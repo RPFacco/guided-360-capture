@@ -32,7 +32,7 @@ let wakeLock = null;
 const dbReady = openStorage().then((n) => {
   storedCount = n;
   if (storedCount) {
-    startBtn.textContent = `Continue (${storedCount} of ${TOTAL_SHOTS})`;
+    startBtn.textContent = `Continuar (${storedCount} de ${TOTAL_SHOTS})`;
     restartBtn.classList.remove("hidden");
   }
 });
@@ -44,7 +44,7 @@ startBtn.addEventListener("click", () => begin(true));
 restartBtn.addEventListener("click", () => {
   if (!restartArmed) {
     restartArmed = true;
-    restartBtn.textContent = `Tap again to discard ${storedCount} photos`;
+    restartBtn.textContent = `Toque de novo para descartar ${storedCount} fotos`;
     return;
   }
   begin(false);
@@ -73,7 +73,7 @@ async function begin(resume) {
   try {
     await startCamera();
   } catch (err) {
-    errorEl.textContent = "Camera error: " + err.message + " (needs an HTTPS page)";
+    errorEl.textContent = "Erro na câmera: " + err.message + " (precisa de uma página HTTPS)";
     errorEl.classList.remove("hidden");
     startBtn.disabled = restartBtn.disabled = false;
     return;
@@ -117,9 +117,9 @@ function leaveCapture() {
   wakeLock = null;
 
   storedCount = photos.length;
-  startBtn.textContent = `Continue (${storedCount} of ${TOTAL_SHOTS})`;
+  startBtn.textContent = `Continuar (${storedCount} de ${TOTAL_SHOTS})`;
   restartArmed = false;
-  restartBtn.textContent = "Start over";
+  restartBtn.textContent = "Recomeçar";
   restartBtn.classList.remove("hidden");
   startBtn.disabled = restartBtn.disabled = false;
 }
@@ -188,7 +188,7 @@ async function shoot() {
 
   if (!blob) {
     shotFailed();
-    setPrompt("Frame dropped - hold still to try again.");
+    setPrompt("A foto falhou - segure parado para tentar de novo.");
     return;
   }
 
@@ -204,7 +204,7 @@ async function packPhotos() {
   const fovSources = new Set();
   for (const p of photos) {
     const blob = await readPhoto(p);
-    if (!blob) throw new Error(`shot ${photoKey(p) + 1} is missing from storage`);
+    if (!blob) throw new Error(`falta a foto ${photoKey(p) + 1} no armazenamento`);
     const l = String(p.level + 1).padStart(2, "0");
     const s = String(p.shot + 1).padStart(2, "0");
     const name = `360_photos/level_${l}_shot_${s}.jpg`;
@@ -241,12 +241,12 @@ async function packPhotos() {
 stitchBtn.addEventListener("click", async () => {
   const label = stitchBtn.textContent;
   stitchBtn.disabled = true;
-  stitchBtn.textContent = "Packing…";
+  stitchBtn.textContent = "Preparando…";
   let content;
   try {
     content = await packPhotos();
   } catch (err) {
-    alert("Failed to build ZIP: " + err.message);
+    alert("Falha ao criar o ZIP: " + err.message);
     return;
   } finally {
     stitchBtn.disabled = false;
@@ -259,7 +259,7 @@ stitchBtn.addEventListener("click", async () => {
 exportBtn.addEventListener("click", async () => {
   const label = exportBtn.textContent;
   exportBtn.disabled = true;
-  exportBtn.textContent = "Packing…";
+  exportBtn.textContent = "Preparando…";
   try {
     const content = await packPhotos();
     const url = URL.createObjectURL(content);
@@ -269,9 +269,9 @@ exportBtn.addEventListener("click", async () => {
     // Not revoked: Opera only reads the URL once the user confirms its download prompt,
     // and a revoked one crashed it.
     a.click();
-    exportBtn.textContent = "Downloaded!";
+    exportBtn.textContent = "Baixado!";
   } catch (err) {
-    alert("Failed to build ZIP: " + err.message);
+    alert("Falha ao criar o ZIP: " + err.message);
     exportBtn.disabled = false;
     exportBtn.textContent = label;
   }
