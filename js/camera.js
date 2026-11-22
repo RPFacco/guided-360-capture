@@ -18,6 +18,8 @@ const STILL_SETTINGS = { imageWidth: 3264, imageHeight: 2448 };
 
 const EXPOSURE_SETTLE_MS = 800;
 const EXPOSURE_MAX_CHANGE = 0.25;
+const EXPOSURE_STEADY = 0.03; // the meter has settled once a reading moves less than this
+const EXPOSURE_STEADY_TRIES = 15; // 200 ms apart
 
 const video = document.getElementById("video");
 let stream = null;
@@ -116,14 +118,29 @@ function meanLuma() {
 
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
+// Auto exposure is still converging after the camera (re)starts.
+async function steadyLuma() {
+  let last = meanLuma();
+  for (let i = 0; i < EXPOSURE_STEADY_TRIES; i++) {
+    await wait(200);
+    const l = meanLuma();
+    if (Math.abs(l - last) <= last * EXPOSURE_STEADY) return l;
+    last = l;
+  }
+  return last;
+}
+
 async function lockExposure(track) {
   exposureLabel = "automática";
   const modes = !IS_IOS && track.getCapabilities ? track.getCapabilities().exposureMode : null;
   if (!modes || !modes.includes("manual")) return;
 
+  // The lens probe's takePhoto restarts the session, and the metering with it.
+  await probeStillFov();
   await wait(EXPOSURE_SETTLE_MS);
   if (!video.videoWidth || track.readyState !== "live") return;
-  const before = meanLuma();
+  const before = await steadyLuma();
+  if (track.readyState !== "live") return;
   const { iso } = track.getSettings();
   try {
     await track.applyConstraints({ advanced: [iso ? { exposureMode: "manual", iso } : { exposureMode: "manual" }] });
