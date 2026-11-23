@@ -18,7 +18,7 @@ import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta,
 import { buildZip } from "./zip.js";
 import { buildPto } from "./pto.js";
 import { describeDevice } from "./device.js";
-import { openPreview, stitchCapture, warmViewer } from "./library.js";
+import { stitchCapture, warmViewer } from "./library.js";
 import { canPreview, renderPreview } from "./preview.js";
 import { resetVoice, startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
@@ -393,24 +393,10 @@ async function packCapture() {
   }
 }
 
-// The phone stitches a quick preview first, so the panorama shows up in seconds
-// however long the server's queue is; the final stitch is one tap away from it.
-// Without sensor angles there is nothing to place the photos by, so the capture
-// goes straight to the server.
+// The capture goes to the server straight away. Meanwhile the phone stitches a quick
+// preview from the sensor angles, which the library offers ("Ver prévia") until the
+// final stitch is ready. Without sensor angles there is no preview, only the upload.
 stitchBtn.addEventListener("click", async () => {
-  const shots = photos.map((p) => ({ rotation: p.rotation, fov: p.fov, tilt: LEVEL_TARGETS[p.level] }));
-  if (canPreview(shots)) {
-    leaveCapture();
-    openPreview(
-      (onProgress) => renderPreview(shots, (n) => readPhoto(photos[n]), onProgress),
-      async () => {
-        const content = await packCapture();
-        if (content) stitchCapture(content);
-      },
-    );
-    return;
-  }
-
   const label = stitchBtn.textContent;
   stitchBtn.disabled = true;
   stitchBtn.textContent = "Preparando…";
@@ -418,8 +404,12 @@ stitchBtn.addEventListener("click", async () => {
   stitchBtn.disabled = false;
   stitchBtn.textContent = label;
   if (!content) return;
+
+  const taken = [...photos]; // a new capture may reset the session while this runs
+  const shots = taken.map((p) => ({ rotation: p.rotation, fov: p.fov, tilt: LEVEL_TARGETS[p.level] }));
+  const preview = canPreview(shots) ? renderPreview(shots, (n) => readPhoto(taken[n])).catch(() => null) : null;
   leaveCapture();
-  stitchCapture(content);
+  stitchCapture(content, preview);
 });
 
 exportBtn.addEventListener("click", async () => {

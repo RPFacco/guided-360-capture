@@ -1,5 +1,6 @@
 import { AuthError, GOOGLE_CLIENT_ID, api, apiUpload, clearToken, getToken, postJson, setToken } from "./api.js";
 import { canPreview, renderPreview } from "./preview.js";
+import { dropPreview, loadPreview, previewIds, savePreview } from "./previews.js";
 import { readZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
@@ -10,8 +11,9 @@ const googleBtn = $("google-btn");
 const library = $("library"), libraryBackBtn = $("library-back-btn"), logoutBtn = $("logout-btn");
 const zipInput = $("zip-input"), libraryMessage = $("library-message"), list = $("panorama-list");
 const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message"), downloadBtn = $("download-btn");
-const previewBar = $("preview-bar"), previewSendBtn = $("preview-send-btn");
-const viewerBackLabel = viewerBackBtn.textContent, previewSendLabel = previewSendBtn.textContent;
+const previewBar = $("preview-bar");
+const cancelDialog = $("cancel-dialog"), cancelText = $("cancel-text");
+const cancelConfirm = $("cancel-confirm"), cancelBack = $("cancel-back");
 
 const POLL_MS = 5000;
 const STATUS_LABELS = { pending: "Na fila", processing: "Costurando…", done: "Pronto", failed: "Falhou" };
@@ -20,8 +22,9 @@ let panoramas = [];
 let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
-let previewSend = null; // while the viewer shows the phone's own preview: sends that capture
-let previewBack = "intro"; // where the preview's back button goes: "intro" or "library"
+let localPreviews = new Set();     // panorama ids with a preview stored on this phone
+const renderingPreviews = new Set(); // panorama ids whose preview is still being made
+let cancelId = null; // the panorama the cancel dialog asks about
 // Not revoked when the viewer closes: Opera reads a download URL only once the user
 // confirms its prompt. Same for the list's last download.
 let image = null;
@@ -59,8 +62,11 @@ function handleError(err) {
   }
 }
 
-export function stitchCapture(zip) {
-  pendingUpload = zip;
+// Sends a capture. preview: a promise of its preview JPEG (null when none can be made),
+// kept on the phone once the upload goes through, so the library can show it until the
+// final stitch is ready.
+export function stitchCapture(zip, preview = null) {
+  pendingUpload = { file: zip, preview };
   openLibrary();
 }
 
@@ -75,9 +81,9 @@ function openLibrary() {
     refresh();
     return;
   }
-  const zip = pendingUpload;
+  const { file, preview } = pendingUpload;
   pendingUpload = null;
-  upload(zip);
+  upload(file, preview);
 }
 
 async function signIn() {
@@ -147,6 +153,15 @@ async function refresh() {
     return;
   }
   panoramas = await res.json();
+
+  // A preview is only needed until its panorama is done.
+  localPreviews = await previewIds();
+  for (const p of panoramas) {
+    if (p.status === "done" && localPreviews.has(p.id)) {
+      dropPreview(p.id);
+      localPreviews.delete(p.id);
+    }
+  }
   if (!library.classList.contains("active")) return;
 
   draw();
@@ -207,8 +222,63 @@ function item(panorama) {
     actions.className = "pano-actions";
     actions.append(view, download);
     li.append(actions);
+  } else {
+    const actions = document.createElement("div");
+    actions.className = "pano-actions";
+
+    if (localPreviews.has(panorama.id) || renderingPreviews.has(panorama.id)) {
+      const preview = document.createElement("button");
+      preview.className = "btn small";
+      if (localPreviews.has(panorama.id)) {
+        preview.textContent = "Ver prévia";
+        preview.addEventListener("click", () => openStoredPreview(panorama.id));
+      } else {
+        preview.textContent = "Montando prévia…";
+        preview.disabled = true;
+      }
+      actions.append(preview);
+    }
+
+    if (panorama.status === "pending" || panorama.status === "processing") {
+      const cancel = document.createElement("button");
+      cancel.className = "btn small cancel";
+      cancel.textContent = "Cancelar";
+      cancel.addEventListener("click", () => askCancel(panorama));
+      actions.append(cancel);
+    }
+
+    if (actions.children.length) li.append(actions);
   }
   return li;
+}
+
+function askCancel({ id, status }) {
+  cancelId = id;
+  const what = status === "processing" ? `A costura do panorama #${id} é interrompida` : `O panorama #${id} sai da fila`;
+  cancelText.textContent = `${what} e as fotos enviadas são apagadas do servidor. Não dá para desfazer.`;
+  cancelDialog.showModal();
+}
+
+// The list is reloaded either way, so it shows what the server really did.
+async function cancelStitch(id) {
+  let res;
+  try {
+    res = await api(`/api/panoramas/${id}`, { method: "DELETE" });
+  } catch (err) {
+    handleError(err);
+    return;
+  }
+  await refresh();
+  const left = panoramas.find((p) => p.id === id);
+  if (!left) {
+    dropPreview(id);
+    localPreviews.delete(id);
+    setMessage(`Costura do panorama #${id} cancelada.`);
+  } else if (left.status === "done" || left.status === "failed") {
+    setMessage("Essa costura já terminou e não dá mais para cancelar.");
+  } else {
+    setMessage(`Não foi possível cancelar a costura (${res.status}).`);
+  }
 }
 
 const imageName = (id) => `panorama_${id}.jpg`;
@@ -277,25 +347,18 @@ export function warmViewer() {
   for (const url of urls) fetch(url).catch(() => {});
 }
 
-// The panorama the phone stitched by itself, before anything is sent: render(onProgress)
-// resolves to its JPEG, send() hands the capture to stitchCapture. back is the screen
-// the preview came from: "intro" after a capture, "library" for a picked .zip.
-export async function openPreview(render, send, back = "intro") {
+// The preview kept on this phone for a panorama still in the queue (see previews.js).
+async function openStoredPreview(id) {
   const gen = ++viewerGen;
+  setViewerMessage("Carregando…");
   show("viewer");
-  previewSend = send;
-  previewBack = back;
-  viewerBackBtn.textContent = back === "library" ? viewerBackLabel : "← Início";
-  setViewerMessage("Montando a prévia…");
   if (image) URL.revokeObjectURL(image.url);
   image = null;
   try {
-    const progress = (done) => {
-      if (gen === viewerGen) setViewerMessage(`Montando a prévia… ${Math.round(done * 100)}%`);
-    };
-    const [blob, { startViewer }] = await Promise.all([render(progress), import("./viewer.js")]);
+    const [blob, { startViewer }] = await Promise.all([loadPreview(id), import("./viewer.js")]);
     if (gen !== viewerGen) return;
-    image = { url: URL.createObjectURL(blob), name: "panorama_previa.jpg" };
+    if (!blob) throw new Error("prévia não encontrada");
+    image = { url: URL.createObjectURL(blob), name: `panorama_${id}_previa.jpg` };
     downloadBtn.classList.remove("hidden");
     previewBar.classList.remove("hidden");
     const started = await startViewer(image.url, setViewerMessage);
@@ -303,8 +366,7 @@ export async function openPreview(render, send, back = "intro") {
     viewer = started;
   } catch (_) {
     if (gen !== viewerGen) return;
-    previewBar.classList.remove("hidden");
-    setViewerMessage("Não foi possível montar a prévia, mas dá para enviar para a versão final.");
+    setViewerMessage("Não foi possível abrir a prévia.");
   }
 }
 
@@ -313,14 +375,23 @@ function closeViewer() {
   viewer?.stop();
   viewer = null;
   downloadBtn.classList.add("hidden");
-  previewSend = null;
   previewBar.classList.add("hidden");
-  viewerBackBtn.textContent = viewerBackLabel;
+}
+
+// Waits for a sent capture's preview, still being made on the phone, and stores it under
+// the panorama's id; its item shows "Montando prévia…" until then.
+async function keepPreview(id, preview) {
+  renderingPreviews.add(id);
+  if (library.classList.contains("active")) draw();
+  const blob = await preview;
+  renderingPreviews.delete(id);
+  if (blob && (await savePreview(id, blob)) != null) localPreviews.add(id);
+  if (library.classList.contains("active")) draw();
 }
 
 // A .zip picked in the library, read for the preview: its sensor angles and the photos
 // they belong to. Null when it cannot be previewed (not a capture, a photo missing,
-// no sensor data), and the zip is then sent straight away, as before.
+// no sensor data): the zip is still sent, just without a preview.
 async function readCapture(file) {
   const zip = await readZip(file);
   const meta = zip && await zip.read("metadata.json");
@@ -337,15 +408,8 @@ zipInput.addEventListener("change", async () => {
   zipInput.value = "";
   if (!file) return;
   const capture = await readCapture(file).catch(() => null);
-  if (!capture) {
-    upload(file);
-    return;
-  }
-  openPreview(
-    (onProgress) => renderPreview(capture.shots, capture.readBlob, onProgress),
-    async () => stitchCapture(file),
-    "library",
-  );
+  const preview = capture && renderPreview(capture.shots, capture.readBlob).catch(() => null);
+  upload(file, preview);
 });
 
 async function keepScreenOn() {
@@ -356,13 +420,16 @@ async function keepScreenOn() {
   }
 }
 
-async function upload(file) {
+async function upload(file, preview = null) {
   const progress = (fraction) => setMessage(`Enviando… ${Math.round(fraction * 100)}%. Mantenha esta tela aberta.`);
   progress(0);
   const lock = await keepScreenOn();
   try {
-    const status = await apiUpload(file, progress);
-    if (status === 201) setMessage("Enviado. Já pode fechar o app: a versão final aparece aqui quando ficar pronta, o que pode demorar se tiver muita gente na fila.");
+    const { status, id } = await apiUpload(file, progress);
+    const withPreview = status === 201 && preview && id != null;
+    if (withPreview) keepPreview(id, preview);
+    if (withPreview) setMessage("Enviado. Enquanto a versão final é costurada, toque em Ver prévia para olhar o panorama.");
+    else if (status === 201) setMessage("Enviado. Já pode fechar o app: a versão final aparece aqui quando ficar pronta, o que pode demorar se tiver muita gente na fila.");
     else if (status === 400) setMessage("Esse arquivo não é um .zip de captura.");
     else if (status === 413) setMessage("O arquivo passa de 300 MB.");
     else setMessage(`Falha no envio (${status}).`);
@@ -381,17 +448,12 @@ loginBackBtn.addEventListener("click", () => {
   show("intro");
 });
 libraryBackBtn.addEventListener("click", () => show("intro"));
-viewerBackBtn.addEventListener("click", () => (previewSend && previewBack === "intro" ? show("intro") : openLibrary()));
-previewSendBtn.addEventListener("click", async () => {
-  if (!previewSend || previewSendBtn.disabled) return;
-  previewSendBtn.disabled = true;
-  previewSendBtn.textContent = "Preparando…";
-  try {
-    await previewSend();
-  } finally {
-    previewSendBtn.disabled = false;
-    previewSendBtn.textContent = previewSendLabel;
-  }
+viewerBackBtn.addEventListener("click", openLibrary);
+cancelBack.addEventListener("click", () => cancelDialog.close());
+cancelConfirm.addEventListener("click", () => {
+  cancelDialog.close();
+  if (cancelId != null) cancelStitch(cancelId);
+  cancelId = null;
 });
 downloadBtn.addEventListener("click", () => saveFile(image.url, image.name));
 registerBtn.addEventListener("click", register);

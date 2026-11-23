@@ -63,8 +63,7 @@
   </header>
   <button id="sensor-btn" class="btn sensor-btn hidden">Ativar sensores</button>
   <div id="preview-bar" class="preview-bar hidden">
-    <p>Esta prévia é feita com qualidade menor e as emendas podem sair desalinhadas. A versão final fica pronta em Meus panoramas.</p>
-    <button id="preview-send-btn" class="btn">Enviar para a versão final</button>
+    <p>Esta prévia é feita com qualidade menor e as emendas podem sair desalinhadas. A versão final aparece em Meus panoramas quando a costura terminar.</p>
   </div>
   <p id="viewer-message" class="viewer-message hidden"></p>
 </section>
@@ -97,6 +96,15 @@
   <div id="flash" class="flash"></div>
   <div id="blur-toast" class="blur-toast" role="status" aria-live="polite"></div>
 </section>
+
+<dialog id="cancel-dialog" class="dialog confirm" aria-labelledby="cancel-title">
+  <h2 id="cancel-title">Cancelar a costura?</h2>
+  <p id="cancel-text"></p>
+  <div class="dialog-actions">
+    <button type="button" id="cancel-confirm" class="btn danger">Cancelar costura</button>
+    <button type="button" id="cancel-back" class="btn secondary">Voltar</button>
+  </div>
+</dialog>
 
 <dialog id="volume-dialog" class="dialog" aria-labelledby="volume-title">
   <h2 id="volume-title">Aumente o volume</h2>

@@ -83,13 +83,14 @@ export async function apiUpload(file, onProgress) {
     clearToken();
     throw new AuthError();
   }
-  if (failed) return failed;
+  if (failed) return { status: failed, id: null };
   const res = await api(`${path}/finish`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ parts: count }),
   });
-  return res.status;
+  const body = res.status === 201 ? await res.json().catch(() => null) : null;
+  return { status: res.status, id: body?.id ?? null };
 }
 
 export async function api(path, options = {}) {
