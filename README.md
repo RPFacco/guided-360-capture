@@ -70,8 +70,8 @@ a 240 px downscale (`js/sharpness.js`), so it never touches a full-size frame; o
 Android the still is decoded only at that small size, and the iOS canvas path measures
 the canvas it already has. After three rejections at the same slot the shot is kept and
 flagged `blurry`, so a surface the metric cannot judge never traps the run.
-`MIN_ACUTANCE` and `RELATIVE_FLOOR` in that file are the tuning knobs if a device
-rejects too much or too little.
+`MIN_ACUTANCE`, `MIN_EDGE` and `RELATIVE_FLOOR` in that file are the tuning knobs if a
+device rejects too much or too little.
 
 FOV comes from the still's EXIF `FocalLengthIn35mmFilm` when the device writes it
 (the `takePhoto` path, i.e. Android/desktop). iOS grabs the preview on a canvas, which
@@ -131,6 +131,18 @@ It takes no stills, can use the preview stream or an optional 1080p/4K `getUserM
 track (`?bitrate=` overrides the default 8 Mbps), and has no measured FOV for the video,
 so stitching still needs that server pass. Serve it from the same HTTPS origin as the app.
 
+To turn a probe folder into stitchable frames:
+
+```bash
+node tools/video-to-frames.mjs ~/Downloads/video_probe
+```
+
+It decodes the 0.8 s hold before each marker, keeps the sharpest frame
+(`frames/level_XX_shot_YY.jpg`), and writes `frames/metadata.json`, `frames/report.json`
+and `frames/pano.pto`. The video FOV cannot be measured, so the pto starts from the
+assumed 53 degree lens: run `cpfind` + `optimize` with `v` free (or Hugin's Align).
+ffmpeg and ffprobe must be on `PATH`.
+
 ## Memory
 
 Each photo is saved to IndexedDB as it is taken instead of being held in memory until
@@ -158,5 +170,6 @@ js/storage.js      IndexedDB
 js/zip.js          ZIP export
 js/pto.js          metadata.json -> Hugin project
 tools/zip-to-pto.mjs  zip -> .pto converter (Node)
+tools/video-to-frames.mjs  video_probe folder -> sharpest frames + .pto (Node)
 tools/video-probe.html  experimental per-level video recorder
 ```

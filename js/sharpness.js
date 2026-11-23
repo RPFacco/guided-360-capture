@@ -10,6 +10,7 @@
 // hunts during takePhoto without depending on scene texture.
 export const ANALYSIS_EDGE = 240;   // short edge of the grayscale frame the metric sees
 export const MIN_CONTRAST = 10;     // luma std dev below this: too flat to judge
+export const MIN_EDGE = 40;         // mean squared gradient below this: too flat to judge
 export const MIN_ACUTANCE = 0.06;   // absolute floor; tune on device
 export const RELATIVE_FLOOR = 0.5;  // a still must keep this share of the preview's score
 
@@ -47,19 +48,23 @@ export function acutance(rgba, w, h) {
     }
   }
   const pixels = (w - 2) * (h - 2);
+  const edge = gradient / pixels;
 
   // gradient/pixels and variance are both in luma^2, so the ratio is dimensionless.
-  return { score: (gradient / pixels) / (variance + 1e-3), contrast: Math.sqrt(variance) };
+  return { score: edge / (variance + 1e-3), edge, contrast: Math.sqrt(variance) };
 }
 
 // preview: the focus measurement taken just before the shutter (may be null).
 export function isBlurry(still, preview) {
   if (!still || !Number.isFinite(still.score)) return false;
-  if (still.contrast < MIN_CONTRAST) return false; // blank surface: no edges to be soft
-  if (still.score < MIN_ACUTANCE) return true;
+  // A flat surface (a plain ceiling) is sharp but has almost no gradient. It cannot be
+  // judged, so let it through; the contrast guard alone does not catch it, a soft
+  // gradient can have plenty of contrast.
+  if (still.contrast < MIN_CONTRAST || still.edge < MIN_EDGE) return false;
   if (preview && Number.isFinite(preview.score) && preview.contrast >= MIN_CONTRAST &&
-      preview.score > 0 && still.score < preview.score * RELATIVE_FLOOR) {
+      preview.edge >= MIN_EDGE && preview.score > 0 &&
+      still.score < preview.score * RELATIVE_FLOOR) {
     return true;
   }
-  return false;
+  return still.score < MIN_ACUTANCE;
 }
