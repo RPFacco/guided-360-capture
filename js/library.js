@@ -1,4 +1,6 @@
 import { AuthError, GOOGLE_CLIENT_ID, api, apiUpload, clearToken, getToken, postJson, setToken } from "./api.js";
+import { canPreview, renderPreview } from "./preview.js";
+import { readZip } from "./zip.js";
 
 const $ = (id) => document.getElementById(id);
 const libraryBtn = $("library-btn");
@@ -19,6 +21,7 @@ let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
 let previewSend = null; // while the viewer shows the phone's own preview: sends that capture
+let previewBack = "intro"; // where the preview's back button goes: "intro" or "library"
 // Not revoked when the viewer closes: Opera reads a download URL only once the user
 // confirms its prompt. Same for the list's last download.
 let image = null;
@@ -275,12 +278,14 @@ export function warmViewer() {
 }
 
 // The panorama the phone stitched by itself, before anything is sent: render(onProgress)
-// resolves to its JPEG, send() packs the capture and hands it to stitchCapture.
-export async function openPreview(render, send) {
+// resolves to its JPEG, send() hands the capture to stitchCapture. back is the screen
+// the preview came from: "intro" after a capture, "library" for a picked .zip.
+export async function openPreview(render, send, back = "intro") {
   const gen = ++viewerGen;
   show("viewer");
   previewSend = send;
-  viewerBackBtn.textContent = "← Início";
+  previewBack = back;
+  viewerBackBtn.textContent = back === "library" ? viewerBackLabel : "← Início";
   setViewerMessage("Montando a prévia…");
   if (image) URL.revokeObjectURL(image.url);
   image = null;
@@ -313,10 +318,34 @@ function closeViewer() {
   viewerBackBtn.textContent = viewerBackLabel;
 }
 
-zipInput.addEventListener("change", () => {
+// A .zip picked in the library, read for the preview: its sensor angles and the photos
+// they belong to. Null when it cannot be previewed (not a capture, a photo missing,
+// no sensor data), and the zip is then sent straight away, as before.
+async function readCapture(file) {
+  const zip = await readZip(file);
+  const meta = zip && await zip.read("metadata.json");
+  if (!meta) return null;
+  const { photos } = JSON.parse(await meta.text());
+  if (!Array.isArray(photos) || !photos.every((p) => p && zip.has(p.file))) return null;
+  const shots = photos.map((p) => ({ rotation: p.rotation, fov: p.fov, tilt: p.tilt }));
+  if (!canPreview(shots)) return null;
+  return { shots, readBlob: (n) => zip.read(photos[n].file, "image/jpeg") };
+}
+
+zipInput.addEventListener("change", async () => {
   const file = zipInput.files[0];
   zipInput.value = "";
-  if (file) upload(file);
+  if (!file) return;
+  const capture = await readCapture(file).catch(() => null);
+  if (!capture) {
+    upload(file);
+    return;
+  }
+  openPreview(
+    (onProgress) => renderPreview(capture.shots, capture.readBlob, onProgress),
+    async () => stitchCapture(file),
+    "library",
+  );
 });
 
 async function keepScreenOn() {
@@ -352,7 +381,7 @@ loginBackBtn.addEventListener("click", () => {
   show("intro");
 });
 libraryBackBtn.addEventListener("click", () => show("intro"));
-viewerBackBtn.addEventListener("click", () => (previewSend ? show("intro") : openLibrary()));
+viewerBackBtn.addEventListener("click", () => (previewSend && previewBack === "intro" ? show("intro") : openLibrary()));
 previewSendBtn.addEventListener("click", async () => {
   if (!previewSend || previewSendBtn.disabled) return;
   previewSendBtn.disabled = true;
