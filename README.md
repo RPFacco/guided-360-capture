@@ -1,175 +1,175 @@
-# Guided 360 Capture
+# Captura 360 guiada
 
-A single-page web app that walks you through shooting a 38-photo turntable set with a
-phone: **5 tilt levels** (+90°, +45°, 0°, -45°, -90°) with **1, 10, 16, 10, 1 shots**,
-evenly spaced around each level. Dots pinned to the scene mark where each shot goes, and
-an arrow from the centre ring points to the next one: aim the centre ring at it. At the end it packs every shot into a single `.zip`.
+Um app web de página única que guia você na captura, com o celular, de um conjunto de 38 fotos
+girando no mesmo lugar: **5 níveis de inclinação** (+90°, +45°, 0°, -45°, -90°) com **1, 10, 16,
+10, 1 fotos**, distribuídas por igual em cada nível. Pontos fixos na cena marcam onde vai cada
+foto, e uma seta saindo do anel central aponta para a próxima: mire o anel central nela. No final, ele junta todas as fotos em um único `.zip`.
 
-All photos come out **3:4 portrait**.
+Todas as fotos saem em **retrato 3:4**.
 
 ## Deploy
 
 https://rpfacco.github.io/guided-360-capture/
 
-## Running it
+## Como rodar
 
-The camera and the gyroscope are both gated behind a **secure context**, so the page
-has to be served over HTTPS (or `localhost`). Opening `index.html` from the filesystem
-will not work, and neither will a plain `http://192.168.x.x` LAN address.
+A câmera e o giroscópio só funcionam em um **contexto seguro**, então a página precisa ser
+servida por HTTPS (ou `localhost`). Abrir o `index.html` direto do sistema de arquivos não
+funciona, e um endereço de rede local `http://192.168.x.x` também não.
 
 ```bash
 python -m http.server 8000
 ```
 
-On the same machine, `http://localhost:8000` is enough, `localhost` counts as secure.
-To reach it from a phone you need an HTTPS tunnel, e.g.:
+Na mesma máquina, `http://localhost:8000` basta: `localhost` conta como seguro.
+Para acessar pelo celular você precisa de um túnel HTTPS, por exemplo:
 
 ```bash
 cloudflared tunnel --url http://localhost:8000
 ```
 
-## How capture works
+## Como a captura funciona
 
-Two paths, picked per platform:
+Um caminho, com o tamanho da prévia escolhido por plataforma:
 
-| Platform | Preview | Photo |
+| Plataforma | Prévia | Foto |
 |---|---|---|
-| Android / desktop | light stream, ~1080 short edge | `ImageCapture.takePhoto()`, full sensor |
-| iOS | up to 3024×4032 | canvas grab of the preview frame |
+| Android / desktop | 1440 no lado menor (a costura reduz toda foto a 1440×1920) | captura do quadro da prévia num canvas |
+| iOS | até 3024×4032 | captura do quadro da prévia num canvas |
 
-On iOS `takePhoto()` reconfigures the capture session on every shot, the preview goes
-black and each still allocates a sensor-sized buffer, which kills the tab after a
-handful of photos. So iOS draws the preview frame to a canvas instead, which means its
-preview has to stay large: there, the photo *is* the preview frame.
+O `takePhoto()` reconfigura a sessão de captura a cada foto: no iOS a prévia fica preta e
+cada foto aloca um buffer do tamanho do sensor, o que derruba a aba depois de algumas fotos;
+no Android a prévia congela por até um segundo. Por isso o app desenha o quadro da prévia
+num canvas, o que significa que a prévia precisa ser grande: a foto *é* o quadro da prévia.
 
-Everywhere else the still comes off a separate pipeline, so the preview is free to be
-small. If `takePhoto()` throws, or returns something that is not 3:4, the app falls
-back to the canvas path for the rest of the run rather than producing a mixed set.
+Com o stream ativo, o app congela a exposição e o balanço de branco (single-shot, ou a
+temperatura de cor convergida no modo manual) para as 38 fotos terem o mesmo aspecto; um
+AWB solto aparece como costura de cor depois da costura. Aparelhos que não expõem esses
+controles (iOS) mantêm os dois automáticos.
 
-Once the stream is live the app freezes exposure and white balance (single-shot, or the
-converged colour temperature in manual mode) so all 38 shots share one look; a drifting
-auto white balance shows up as colour seams after stitching. Devices that do not expose
-those controls (iOS) keep them automatic.
+A nitidez de cada foto também é medida. O app calcula a acutância (energia do gradiente
+normalizada pela variância) num downscale de 240 px, direto do canvas da captura, e uma
+foto claramente mole é descartada: aparece um aviso vermelho no topo, o botão de desfazer
+pisca e a vaga continua aberta para tirar de novo. Os números ficam no `metadata.json`:
+`sharpness` em cada foto e uma lista `rejected` com as tentativas descartadas (sem a
+imagem). Depois de três rejeições na mesma vaga a foto é mantida e marcada com
+`blurry: true`, para uma superfície que a métrica não consegue julgar nunca travar a
+captura. `MIN_ACUTANCE` e `MIN_EDGE` em `js/sharpness.js` são os botões de ajuste.
 
-## Export
+O FOV vem do EXIF do `takePhoto`. O canvas não tem EXIF, então o app tira um único
+`takePhoto` descartável na inicialização (em qualquer plataforma que exponha
+`ImageCapture`) só para ler a lente (`fov.source` = `exif-probe`); sem isso, ou se o
+aparelho remove o EXIF, usa a lente assumida de ~53° no lado menor (`fov.source` =
+`assumed`). A sobreposição dos alvos projeta com a lente medida assim que ela é
+conhecida; até lá usa a suposição. O `metadata.json` registra a origem de cada foto em
+`fov.source` e a da captura inteira em `fovSource`.
 
-The `.zip` holds `360_photos/level_NN_shot_NN.jpg`, a `metadata.json` with, for every
-shot: the target tilt/heading, the camera rotation at the shutter (yaw, pitch, roll and
-the raw 3x3 device-to-world matrix) and the horizontal/vertical/diagonal FOV, plus a
-`pano.pto` Hugin project.
+## Exportação
 
-`metadata.json` also carries a run-level `device` block (raw user agent, platform, a
-best-effort model when the browser exposes one, and the screen size), so captures from
-different phones can be told apart when grouping samples later.
+O `.zip` contém `360_photos/level_NN_shot_NN.jpg` e um `metadata.json` com, para cada foto:
+a inclinação/direção alvo, a rotação da câmera no disparo (yaw, pitch, roll e a matriz 3x3
+bruta do dispositivo para o mundo), o FOV horizontal/vertical/diagonal, `sharpness` e
+`blurry`, além de um `pano.pto` para o Hugin.
 
-Every shot is also scored for focus. A still that comes out clearly softer than the
-preview at the shutter is thrown away, a red toast asks for a retake, and the numbers
-stay in `metadata.json`: `sharpness` on each photo and a `rejected` list with the
-attempts that were discarded. The metric is acutance (gradient energy over variance) on
-a 240 px downscale (`js/sharpness.js`), so it never touches a full-size frame; on
-Android the still is decoded only at that small size, and the iOS canvas path measures
-the canvas it already has. After three rejections at the same slot the shot is kept and
-flagged `blurry`, so a surface the metric cannot judge never traps the run.
-`MIN_ACUTANCE`, `MIN_EDGE` and `RELATIVE_FLOOR` in that file are the tuning knobs if a
-device rejects too much or too little.
+O `metadata.json` também leva um bloco `device` no nível da captura (user agent bruto,
+plataforma, modelo quando o navegador expõe e o tamanho da tela), para separar amostras de
+celulares diferentes depois.
 
-FOV comes from the still's EXIF `FocalLengthIn35mmFilm` when the device writes it
-(the `takePhoto` path, i.e. Android/desktop). iOS grabs the preview on a canvas, which
-carries no EXIF, so on Safari 18.4+ it takes a single throwaway `takePhoto` at start-up
-just to read the lens (`fov.source` = `exif-probe`); older Safari, or a device that
-strips EXIF, falls back to the assumed ~53 degree lens across the short edge
-(`fov.source` = `assumed`). The target overlay projects with the measured lens as soon
-as one is known, and with that assumption until then. `metadata.json` records the
-per-shot source in `fov.source` and the run-level `fovSource`.
+## Projeto Hugin
 
-## Hugin project
+O `pano.pto` é montado a partir do `metadata.json` para o Hugin começar da pose medida em
+vez de tentar recuperá-la: cada imagem recebe seu próprio yaw/pitch/roll e campo de visão,
+e todas as fotos que compartilham a mesma lente ficam ligadas num único grupo.
 
-`pano.pto` is built from `metadata.json` so Hugin starts from the measured pose instead
-of trying to recover it: each image gets its own yaw/pitch/roll and field of view, and
-every still that shares a lens is linked into one lens.
+Descompacte o arquivo e abra o `pano.pto`. Ainda não há pontos de controle: rode o
+**Align** do Assistant (ou `cpfind` + **Optimize**) e depois **Stitch**. Como as imagens
+já estão no lugar certo, a busca de pontos começa do layout real, e `cpfind --prealigned`
+compara apenas imagens com sobreposição.
 
-Unzip the archive and open `pano.pto`. There are no control points yet: run the
-Assistant's **Align** (or `cpfind` + **Optimize**), then **Stitch**. Because the images
-already sit in the right place, control point search starts from the real layout, and
-`cpfind --prealigned` only compares overlapping images.
+A correspondência com as convenções do Hugin (conferida contra o código de transformação
+do libpano13) é:
 
-The mapping to Hugin's conventions (checked against libpano13's transform code) is:
-
-| Hugin | From the metadata |
+| Hugin | Do metadata |
 |---|---|
-| `y` yaw | measured heading; both grow clockwise, so no flip |
-| `p` pitch | measured elevation of the optical axis |
-| `r` roll | measured roll negated, plus the JPEG EXIF orientation (6 -> +90°) |
-| `v` | horizontal FOV across the stored pixel width |
+| `y` yaw | direção medida; os dois crescem no sentido horário, então não há flip |
+| `p` pitch | elevação medida do eixo óptico |
+| `r` roll | roll medido negado, mais a orientação EXIF do JPEG (6 -> +90°) |
+| `v` | FOV horizontal ao longo da largura armazenada |
 
-Roll and `v` need that care because Android stills are stored landscape and carry an
-EXIF orientation: Hugin would add the orientation itself when opening the JPEG, but a
-pto's explicit `r` wins, so the project folds it in. Absolute yaw is arbitrary in a
-panorama (only relative angles matter), so the compass headings are kept as they are.
+O roll e o `v` precisam desse cuidado em capturas antigas salvas como stills de Android
+em paisagem com orientação EXIF: o Hugin aplicaria a orientação ao abrir o JPEG, mas o
+`r` explícito do pto vence, então o projeto já a incorpora. Nas capturas novas, feitas
+pelo canvas, a imagem já é vertical e a orientação é 1. O yaw absoluto é arbitrário num
+panorama (só os ângulos relativos importam), então as direções da bússola ficam como estão.
 
-To rebuild the project from an existing zip, or to choose a different output size:
+Para reconstruir o projeto a partir de um zip existente, ou escolher outro tamanho de saída:
 
 ```bash
 node tools/zip-to-pto.mjs 360_photos.zip
 node tools/zip-to-pto.mjs 360_photos.zip -o pano.pto --width 12000
 ```
 
-It reads `metadata.json` from the archive, writes `<zip name>.pto` next to it and
-extracts the photos (existing files are left alone). `--no-extract` writes the project
-only. Node 16+ is needed for the CLI; the site itself has no build step.
+Ele lê o `metadata.json` do arquivo, grava `<nome do zip>.pto` ao lado e extrai as fotos
+(as existentes são mantidas). `--no-extract` grava só o projeto. Node 16+ é necessário
+para a CLI; o site não tem etapa de build.
 
 ## Video probe (experimental)
 
-`tools/video-probe.html` is a spike for a video-based capture. It runs the same target
-guidance as the normal capture, but records **one clip per level** with `MediaRecorder`
-(1 s timeslice, which avoids the iOS MP4 stall) instead of taking stills, logs
-`deviceorientation` samples, and marks the moment each target was aimed. It downloads
-`video_probe.zip` with the clips and `video/metadata.json`; a server-side ffmpeg pass is
-then supposed to pick a sharp frame near each marker.
+`tools/video-probe.html` é um spike de captura em vídeo. Ele roda a mesma orientação por
+alvos da captura normal, mas grava **um clipe por nível** com `MediaRecorder` (timeslice
+de 1 s, que evita o travamento do MP4 no iOS) em vez de tirar fotos, registra amostras de
+`deviceorientation` e marca o instante em que cada alvo foi mirado. Ele baixa
+`video_probe.zip` com os clipes e `video/metadata.json`; um passo com ffmpeg no servidor
+deveria então escolher um quadro nítido perto de cada marker.
 
-It takes no stills, can use the preview stream or an optional 1080p/4K `getUserMedia`
-track (`?bitrate=` overrides the default 8 Mbps), and has no measured FOV for the video,
-so stitching still needs that server pass. Serve it from the same HTTPS origin as the app.
+Ele não tira fotos, pode usar o stream da prévia ou um track `getUserMedia` opcional de
+1080p/4K (`?bitrate=` troca os 8 Mbps padrão), e não tem FOV medido para o vídeo, então a
+costura ainda depende desse passo no servidor. Sirva-o da mesma origem HTTPS do app.
 
-To turn a probe folder into stitchable frames:
+Para transformar uma pasta do probe em quadros costuráveis:
 
 ```bash
 node tools/video-to-frames.mjs ~/Downloads/video_probe
 ```
 
-It decodes the 0.8 s hold before each marker, keeps the sharpest frame
-(`frames/level_XX_shot_YY.jpg`), and writes `frames/metadata.json`, `frames/report.json`
-and `frames/pano.pto`. The video FOV cannot be measured, so the pto starts from the
-assumed 53 degree lens: run `cpfind` + `optimize` with `v` free (or Hugin's Align).
-ffmpeg and ffprobe must be on `PATH`.
+Ele decodifica os 0,8 s de espera antes de cada marker, mantém o quadro mais nítido
+(`frames/level_XX_shot_YY.jpg`) e grava `frames/metadata.json`, `frames/report.json` e
+`frames/pano.pto`. O FOV do vídeo não pode ser medido, então o pto começa da lente
+assumida de 53°: rode `cpfind` + `optimize` com `v` livre (ou o Align do Hugin).
+`ffmpeg` e `ffprobe` precisam estar no `PATH`.
 
-## Memory
+## Memória
 
-Each photo is saved to IndexedDB as it is taken instead of being held in memory until
-export. The ZIP is stored, not deflated, because compressing 38 JPEGs in one pass was
-enough on its own to push mobile Safari over its limit. If the export dies, lower
-`STILL_SETTINGS` in `camera.js`.
+Cada foto é salva no IndexedDB assim que é tirada, em vez de ficar na memória até a
+exportação. O ZIP é gravado sem compressão, porque comprimir 38 JPEGs de uma só vez já
+bastava para estourar o limite do Safari no celular. Se a exportação falhar, reduza
+`LONG_EDGE` em `camera.js`.
 
-## Files
+## Arquivos
 
 ```
-index.html         markup
-style.css          styling, including the 3:4 preview frame
-js/app.js          start-up and capture flow
-js/session.js      shot layout, progress, heading reference
-js/orientation.js  gyroscope and rotation math
-js/camera.js       preview stream and photo capture
-js/fov.js          EXIF focal-length read and field-of-view math
-js/device.js       device description written to metadata.json
-js/sharpness.js    focus check (acutance) that gates capture
-js/autoshot.js     automatic shutter
-js/hud.js          alignment and on-screen text
-js/dome.js         coverage dome
-js/targets.js      dots pinned to the scene, arrow to the next
+index.html         marcação
+style.css          estilos, incluindo o quadro de prévia 3:4
+js/app.js          inicialização e fluxo da captura
+js/session.js      distribuição das fotos, progresso, referência de direção
+js/orientation.js  giroscópio e cálculos de rotação
+js/camera.js       stream da prévia e captura das fotos
+js/fov.js          leitura da distância focal no EXIF e cálculo do campo de visão
+js/device.js       descrição do aparelho gravada no metadata.json
+js/sharpness.js    checagem de foco (acutância) que libera a captura
+js/autoshot.js     disparo automático
+js/hud.js          alinhamento e textos na tela
+js/dome.js         domo de cobertura
+js/targets.js      pontos fixos na cena, seta para o próximo
 js/storage.js      IndexedDB
-js/zip.js          ZIP export
-js/pto.js          metadata.json -> Hugin project
-tools/zip-to-pto.mjs  zip -> .pto converter (Node)
-tools/video-to-frames.mjs  video_probe folder -> sharpest frames + .pto (Node)
-tools/video-probe.html  experimental per-level video recorder
+js/zip.js          exportação ZIP
+js/pto.js          metadata.json -> projeto Hugin
+js/library.js      login, biblioteca e upload
+js/viewer.js       visualizador 360
+js/api.js          cliente da API do backend
+js/voice.js        instruções por voz
+audio/             falas das instruções
+tools/zip-to-pto.mjs  zip -> .pto (Node)
+tools/video-to-frames.mjs  pasta video_probe -> quadros + .pto (Node)
+tools/video-probe.html  gravador experimental de vídeo por nível
 ```

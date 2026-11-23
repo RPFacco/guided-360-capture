@@ -10,7 +10,7 @@ const zipInput = $("zip-input"), libraryMessage = $("library-message"), list = $
 const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message"), downloadBtn = $("download-btn");
 
 const POLL_MS = 5000;
-const STATUS_LABELS = { pending: "Waiting", processing: "Stitching…", done: "Ready", failed: "Failed" };
+const STATUS_LABELS = { pending: "Na fila", processing: "Costurando…", done: "Pronto", failed: "Falhou" };
 
 let panoramas = [];
 let pollTimer = null;
@@ -46,10 +46,10 @@ function showLoginError(text) {
 
 function handleError(err) {
   if (err instanceof AuthError) {
-    showLoginError("Your session ended. Sign in again.");
+    showLoginError("Sua sessão expirou. Entre de novo.");
     show("login");
   } else {
-    setMessage("Could not reach the server.");
+    setMessage("Não foi possível conectar ao servidor.");
   }
 }
 
@@ -78,11 +78,11 @@ async function signIn() {
   showLoginError("");
   try {
     const res = await postJson("/api/login", { email: emailInput.value, password: passwordInput.value });
-    if (res.status === 401) return showLoginError("Wrong email or password.");
-    if (!res.ok) return showLoginError(`Sign-in failed (${res.status}).`);
+    if (res.status === 401) return showLoginError("E-mail ou senha incorretos.");
+    if (!res.ok) return showLoginError(`Falha ao entrar (${res.status}).`);
     setToken((await res.json()).token);
   } catch (_) {
-    return showLoginError("Could not reach the server.");
+    return showLoginError("Não foi possível conectar ao servidor.");
   }
   passwordInput.value = "";
   openLibrary();
@@ -94,6 +94,7 @@ function renderGoogleButton() {
   google.accounts.id.renderButton(googleBtn, {
     theme: "outline",
     size: "large",
+    locale: "pt-BR",
     width: Math.min(400, googleBtn.clientWidth),
   });
   googleReady = true;
@@ -103,11 +104,11 @@ async function signInWithGoogle({ credential }) {
   showLoginError("");
   try {
     const res = await postJson("/api/auth/google", { credential });
-    if (res.status === 409) return showLoginError("This email already has an account with a password. Sign in with it.");
-    if (!res.ok) return showLoginError(`Google sign-in failed (${res.status}).`);
+    if (res.status === 409) return showLoginError("Este e-mail já tem uma conta com senha. Entre com a senha.");
+    if (!res.ok) return showLoginError(`Falha ao entrar com o Google (${res.status}).`);
     setToken((await res.json()).token);
   } catch (_) {
-    return showLoginError("Could not reach the server.");
+    return showLoginError("Não foi possível conectar ao servidor.");
   }
   openLibrary();
 }
@@ -117,11 +118,11 @@ async function register() {
   if (!loginForm.reportValidity()) return;
   try {
     const res = await postJson("/api/register", { email: emailInput.value, password: passwordInput.value });
-    if (res.status === 409) return showLoginError("This email already has an account. Sign in instead.");
-    if (res.status === 400) return showLoginError("Use a valid email and a password with at least 8 characters.");
-    if (!res.ok) return showLoginError(`Could not create the account (${res.status}).`);
+    if (res.status === 409) return showLoginError("Este e-mail já tem uma conta. Toque em Entrar.");
+    if (res.status === 400) return showLoginError("Use um e-mail válido e uma senha com pelo menos 8 caracteres.");
+    if (!res.ok) return showLoginError(`Não foi possível criar a conta (${res.status}).`);
   } catch (_) {
-    return showLoginError("Could not reach the server.");
+    return showLoginError("Não foi possível conectar ao servidor.");
   }
   signIn();
 }
@@ -136,7 +137,7 @@ async function refresh() {
     return;
   }
   if (!res.ok) {
-    setMessage(`Could not load your panoramas (${res.status}).`);
+    setMessage(`Não foi possível carregar seus panoramas (${res.status}).`);
     return;
   }
   panoramas = await res.json();
@@ -152,7 +153,7 @@ function draw() {
   if (!panoramas.length) {
     const empty = document.createElement("li");
     empty.className = "pano-empty";
-    empty.textContent = "No panoramas yet. Upload the .zip from a capture to stitch one.";
+    empty.textContent = "Nenhum panorama ainda. Envie o .zip de uma captura para costurar um.";
     list.replaceChildren(empty);
     return;
   }
@@ -167,7 +168,7 @@ function item(panorama) {
   // SQLite stores UTC; show it in the phone's own time zone.
   const date = document.createElement("div");
   date.className = "pano-date";
-  date.textContent = new Date(panorama.created_at.replace(" ", "T") + "Z").toLocaleString();
+  date.textContent = new Date(panorama.created_at.replace(" ", "T") + "Z").toLocaleString("pt-BR");
 
   const info = document.createElement("div");
   info.className = "pano-info";
@@ -188,12 +189,12 @@ function item(panorama) {
   if (panorama.status === "done") {
     const view = document.createElement("button");
     view.className = "btn small";
-    view.textContent = "View";
+    view.textContent = "Ver";
     view.addEventListener("click", () => openViewer(panorama.id));
 
     const download = document.createElement("button");
     download.className = "btn small";
-    download.textContent = "Download";
+    download.textContent = "Baixar";
     download.addEventListener("click", () => downloadPanorama(panorama.id, download));
 
     const actions = document.createElement("div");
@@ -217,7 +218,7 @@ function saveFile(url, name) {
 async function downloadPanorama(id, button) {
   if (listBusy) return;
   listBusy = true;
-  button.textContent = "Downloading…";
+  button.textContent = "Baixando…";
   try {
     const res = await api(`/api/panoramas/${id}/image`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -227,10 +228,10 @@ async function downloadPanorama(id, button) {
     saveFile(listUrl, imageName(id));
   } catch (err) {
     if (err instanceof AuthError) handleError(err);
-    else setMessage("Could not download the panorama.");
+    else setMessage("Não foi possível baixar o panorama.");
   } finally {
     listBusy = false;
-    button.textContent = "Download";
+    button.textContent = "Baixar";
   }
 }
 
@@ -241,7 +242,7 @@ function setViewerMessage(text) {
 
 async function openViewer(id) {
   const gen = ++viewerGen;
-  setViewerMessage("Loading…");
+  setViewerMessage("Carregando…");
   show("viewer");
   if (image) URL.revokeObjectURL(image.url);
   image = null;
@@ -258,7 +259,7 @@ async function openViewer(id) {
   } catch (err) {
     if (gen !== viewerGen) return;
     if (err instanceof AuthError) return handleError(err);
-    setViewerMessage("Could not open the panorama.");
+    setViewerMessage("Não foi possível abrir o panorama.");
   }
 }
 
@@ -284,15 +285,15 @@ async function keepScreenOn() {
 }
 
 async function upload(file) {
-  const progress = (fraction) => setMessage(`Uploading… ${Math.round(fraction * 100)}%. Keep this screen open.`);
+  const progress = (fraction) => setMessage(`Enviando… ${Math.round(fraction * 100)}%. Mantenha esta tela aberta.`);
   progress(0);
   const lock = await keepScreenOn();
   try {
     const status = await apiUpload(file, progress);
-    if (status === 201) setMessage("Uploaded. You can close the app now: stitching takes about 6 minutes.");
-    else if (status === 400) setMessage("That file is not a capture .zip.");
-    else if (status === 413) setMessage("The file is over 300 MB.");
-    else setMessage(`Upload failed (${status}).`);
+    if (status === 201) setMessage("Enviado. Já pode fechar o app: a costura leva cerca de 6 minutos.");
+    else if (status === 400) setMessage("Esse arquivo não é um .zip de captura.");
+    else if (status === 413) setMessage("O arquivo passa de 300 MB.");
+    else setMessage(`Falha no envio (${status}).`);
   } catch (err) {
     handleError(err);
     return;

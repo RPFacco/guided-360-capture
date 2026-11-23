@@ -53,7 +53,7 @@ undoBtn.addEventListener("click", () => {
   undoShot();
   markers.pop();
   refreshHUD();
-  setPrompt("Marker removed.");
+  setPrompt("Marker removed.", null);
 });
 
 function pickMime() {
@@ -83,7 +83,7 @@ async function begin() {
   const forVideo = res === "2160" ? { width: 3840, height: 2160 }
       : res === "1080" ? { width: 1920, height: 1080 } : null;
   try {
-    await startCamera(forVideo ? { forVideo } : {});
+    await startCamera({ ...(forVideo ? { forVideo } : {}), probeLens: false });
   } catch (err) {
     errorEl.textContent = "Camera error: " + err.message + " (needs HTTPS)";
     errorEl.classList.remove("hidden");
@@ -94,10 +94,10 @@ async function begin() {
   if (gyroActive) {
     startOrientation();
     setTimeout(() => {
-      if (!gotOrientation) setPrompt("No motion sensor - markers still record, poses will be empty.");
+      if (!gotOrientation) setPrompt("No motion sensor - markers still record, poses will be empty.", null);
     }, 2000);
   } else {
-    setPrompt("No motion sensor - markers still record, poses will be empty.");
+    setPrompt("No motion sensor - markers still record, poses will be empty.", null);
   }
   window.addEventListener("deviceorientation", logPose);
 
@@ -137,7 +137,7 @@ function mark() {
   shotTaken(null, rotation, null, null, false);
   markers.push({ level: level + 1, shot: shot + 1, t, rotation, clipId: clip ? clip.id : null });
   refreshHUD();
-  if (isDone()) setPrompt("All targets marked - download the probe.");
+  if (isDone()) setPrompt("All targets marked - download the probe.", null);
 }
 
 function syncClip() {

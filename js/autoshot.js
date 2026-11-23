@@ -4,7 +4,7 @@ import { tiltAligned, YAW_TOLERANCE } from "./hud.js";
 
 // Aimed at the target and held still this long, the photo takes itself.
 const HOLD_MS = 800;
-const STILL_DEG = 3; // the aim may wander this far during the hold: hand tremor, not a pan
+export const STILL_DEG = 3; // the aim may wander this far during the hold: hand tremor, not a pan
 
 let holdSince = null;
 let holdAnchor = null; // rotation when the hold started
@@ -37,6 +37,5 @@ export function updateAutoShot(now, busy) {
   if (holdProgress < 1) return false;
   holdSince = null;
   holdProgress = 0;
-  if (navigator.vibrate) navigator.vibrate(30);
   return true;
 }

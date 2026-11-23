@@ -45,7 +45,7 @@ export async function startViewer(imageUrl, say) {
     sensorBtn.classList.add("hidden");
     controls = new DeviceOrientationControls(camera);
     sensorTimer = setTimeout(() => {
-      if (!aligned) say("Motion sensor not available. Drag to look around.");
+      if (!aligned) say("Sensor de movimento indisponível. Arraste para olhar em volta.");
     }, SENSOR_WAIT_MS);
   }
 

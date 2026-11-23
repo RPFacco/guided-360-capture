@@ -6,26 +6,30 @@ import {
 import {
   gyroActive, gotOrientation, rawPitch, rawYaw, displayPitch, displayYaw,
   requestGyro, startOrientation, stopOrientation, smoothOrientation, forgetHeading,
-  captureRotation,
+  captureRotation, rawRotation, rotationAngle,
 } from "./orientation.js";
-import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov, adoptFov, previewSharpness } from "./camera.js";
+import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov, adoptFov } from "./camera.js";
 import { isBlurry } from "./sharpness.js";
 import { updateTilt, updateHUD, updatePerf, countFrame, showShot, showSharpness, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
-import { holdProgress, updateAutoShot } from "./autoshot.js";
+import { holdProgress, updateAutoShot, STILL_DEG } from "./autoshot.js";
 import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
 import { buildPto } from "./pto.js";
 import { describeDevice } from "./device.js";
 import { stitchCapture } from "./library.js";
+import { resetVoice, startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
 const intro = $("intro"), capture = $("capture");
 const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("error");
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
-const flash = $("flash"), blurToast = $("blur-toast");
+const repeatBtn = $("repeat-btn"), voiceBtn = $("voice-btn");
+const volumeDialog = $("volume-dialog"), volumeOk = $("volume-ok");
+const flash = $("flash"), holding = $("holding"), blurToast = $("blur-toast");
 const exportLabel = exportBtn.textContent;
+const HOLDING_DELAY_MS = 150; // quicker captures (iOS) never show the hold notice
 
 let running = false;
 let busy = false;
@@ -36,11 +40,14 @@ const rejectedShots = []; // blur rejections, logged to metadata without the ima
 let retryAfter = 0;       // pause auto-shot after a rejection so the toast cannot spam
 let rejectStreak = 0;     // consecutive rejects at this slot; see the cap in shoot()
 let blurTimer = null;
+let waiting = false; // the camera is open, the volume notice not yet answered
+let shotStart = null; // rotation at the shutter, until the picture is fixed
+let shotDrift = 0;    // furthest the phone got from it meanwhile, degrees
 
 const dbReady = openStorage().then((n) => {
   storedCount = n;
   if (storedCount) {
-    startBtn.textContent = `Continue (${storedCount} of ${TOTAL_SHOTS})`;
+    startBtn.textContent = `Continuar (${storedCount} de ${TOTAL_SHOTS})`;
     restartBtn.classList.remove("hidden");
   }
 });
@@ -52,7 +59,7 @@ startBtn.addEventListener("click", () => begin(true));
 restartBtn.addEventListener("click", () => {
   if (!restartArmed) {
     restartArmed = true;
-    restartBtn.textContent = `Tap again to discard ${storedCount} photos`;
+    restartBtn.textContent = `Toque de novo para descartar ${storedCount} fotos`;
     return;
   }
   begin(false);
@@ -61,6 +68,7 @@ restartBtn.addEventListener("click", () => {
 async function begin(resume) {
   errorEl.classList.add("hidden");
   startBtn.disabled = restartBtn.disabled = true;
+  resetVoice();
 
   // Before anything else is awaited: iOS only grants orientation from inside the tap.
   await requestGyro();
@@ -90,7 +98,7 @@ async function begin(resume) {
   try {
     await startCamera();
   } catch (err) {
-    errorEl.textContent = "Camera error: " + err.message + " (needs an HTTPS page)";
+    errorEl.textContent = "Erro na câmera: " + err.message + " (precisa de uma página HTTPS)";
     errorEl.classList.remove("hidden");
     startBtn.disabled = restartBtn.disabled = false;
     return;
@@ -114,7 +122,29 @@ async function begin(resume) {
   updatePerf();
   probeStillFov();
   requestAnimationFrame(renderLoop);
+
+  // Photos and voice wait for this notice, so they start once the phone is in hand.
+  if (voiceMuted()) {
+    startVoice(false);
+  } else {
+    waiting = true;
+    volumeOk.textContent = photos.length ? "Retomar" : "Começar";
+    volumeDialog.showModal();
+  }
 }
+
+// From the tap itself: iOS only starts audio inside one.
+function startShooting() {
+  if (!waiting) return;
+  waiting = false;
+  startVoice(!photos.length);
+}
+
+volumeOk.addEventListener("click", () => {
+  startShooting();
+  volumeDialog.close();
+});
+volumeDialog.addEventListener("close", startShooting); // Esc or the back button
 
 function noSensor() {
   stopOrientation();
@@ -131,13 +161,14 @@ function leaveCapture() {
   stopOrientation();
   stopCamera();
   hideBlur();
+  stopVoice();
   wakeLock?.release().catch(() => {});
   wakeLock = null;
 
   storedCount = photos.length;
-  startBtn.textContent = `Continue (${storedCount} of ${TOTAL_SHOTS})`;
+  startBtn.textContent = `Continuar (${storedCount} de ${TOTAL_SHOTS})`;
   restartArmed = false;
-  restartBtn.textContent = "Start over";
+  restartBtn.textContent = "Recomeçar";
   restartBtn.classList.remove("hidden");
   startBtn.disabled = restartBtn.disabled = false;
 }
@@ -148,12 +179,26 @@ document.addEventListener("visibilitychange", () => {
     // Relative yaw may restart while hidden, same as a reload.
     loseHeading(busy);
     forgetHeading();
+    stopVoice();
     updateHUD();
     return;
   }
   resumePreview();
   keepAwake();
+  resumeVoice();
 });
+
+function showVoice() {
+  voiceBtn.classList.toggle("off", voiceMuted());
+  voiceBtn.setAttribute("aria-label", voiceMuted() ? "Ligar voz" : "Desligar voz");
+}
+showVoice();
+
+voiceBtn.addEventListener("click", () => {
+  toggleVoice();
+  showVoice();
+});
+repeatBtn.addEventListener("click", () => repeatVoice(!photos.length));
 
 window.addEventListener("resize", () => { if (running) initTargets(); });
 
@@ -164,7 +209,8 @@ function renderLoop(now) {
   smoothOrientation();
   if (gyroActive && rawPitch !== null) updateTilt(displayPitch);
   if (gyroActive && rawYaw !== null) anchorHeading(displayYaw);
-  if (updateAutoShot(now, busy) && now >= retryAfter) shoot();
+  if (shotStart && rawRotation) shotDrift = Math.max(shotDrift, rotationAngle(shotStart, rawRotation));
+  if (updateAutoShot(now, busy || waiting) && now >= retryAfter) shoot();
   drawDome();
   if (!hasVFC) drawTargets(holdProgress);
   countFrame(now);
@@ -193,7 +239,7 @@ undoBtn.addEventListener("click", () => {
 const round4 = (v) => Math.round(v * 10000) / 10000;
 
 function warnBlur() {
-  blurToast.textContent = "Out of focus - take it again";
+  blurToast.textContent = "Fora de foco - tire de novo";
   blurToast.classList.add("show");
   undoBtn.classList.add("alert");
   clearTimeout(blurTimer);
@@ -207,34 +253,50 @@ function hideBlur() {
   undoBtn.classList.remove("alert");
 }
 
+// The flash waits for the picture, and until then the screen says to hold still:
+// moving in between spoils it.
 async function shoot() {
   busy = true;
-  // Before capturePhoto(): takePhoto drops the preview layer, and on Android the still
-  // comes off a different pipeline, so the preview is the reference to compare against.
-  const preview = previewSharpness();
   const rotation = captureRotation(); // the capture can take a second, and the phone moves on
-
-  flash.classList.add("animate");
-  setTimeout(() => flash.classList.remove("animate"), 180);
+  shotStart = rawRotation;
+  shotDrift = 0;
+  let fixed = false, moved = false;
+  const holdTimer = setTimeout(() => holding.classList.remove("hidden"), HOLDING_DELAY_MS);
+  const settle = () => {
+    clearTimeout(holdTimer);
+    holding.classList.add("hidden");
+    shotStart = null;
+  };
+  const exposed = () => {
+    if (fixed) return;
+    fixed = true;
+    moved = shotDrift > STILL_DEG;
+    settle();
+    if (moved) return;
+    flash.classList.add("animate");
+    setTimeout(() => flash.classList.remove("animate"), 180);
+    if (navigator.vibrate) navigator.vibrate(30);
+  };
 
   undoBtn.disabled = true;
   let shot = null;
   try {
-    shot = await capturePhoto();
+    shot = await capturePhoto(exposed);
   } catch (_) {}
+  settle();
   undoBtn.disabled = !photos.length;
   busy = false;
 
-  if (!shot) {
+  if (!shot || !shot.blob || moved) {
     shotFailed();
-    setPrompt("Frame dropped - hold still to try again.");
+    setPrompt(moved ? "O celular mexeu - segure parado para tentar de novo." : "A foto falhou - segure parado para tentar de novo.", "falhou");
     return;
   }
 
   const { blob, sharpness } = shot;
   showSharpness(sharpness);
 
-  if (isBlurry(sharpness, preview)) {
+  if (isBlurry(sharpness, null)) {
     rejectedShots.push({
       level: currentLevel + 1,
       shot: currentShot + 1,
@@ -252,14 +314,14 @@ async function shoot() {
       showShot(blob.size);
       savePhoto(shotTaken(blob, rotation, shotFov, sharpness, true));
       updateHUD();
-      setPrompt("Saved anyway - focus uncertain.");
+      setPrompt("Salva mesmo assim - foco incerto.", null);
       return;
     }
 
     warnBlur();
     retryAfter = performance.now() + 1500;
     updateHUD();
-    setPrompt("Out of focus - take it again.");
+    setPrompt("Fora de foco - tire de novo.", "falhou");
     return;
   }
 
@@ -277,7 +339,7 @@ async function packPhotos() {
   const fovSources = new Set();
   for (const p of photos) {
     const blob = await readPhoto(p);
-    if (!blob) throw new Error(`shot ${photoKey(p) + 1} is missing from storage`);
+    if (!blob) throw new Error(`falta a foto ${photoKey(p) + 1} no armazenamento`);
     const l = String(p.level + 1).padStart(2, "0");
     const s = String(p.shot + 1).padStart(2, "0");
     const name = `360_photos/level_${l}_shot_${s}.jpg`;
@@ -323,12 +385,12 @@ async function packPhotos() {
 stitchBtn.addEventListener("click", async () => {
   const label = stitchBtn.textContent;
   stitchBtn.disabled = true;
-  stitchBtn.textContent = "Packing…";
+  stitchBtn.textContent = "Preparando…";
   let content;
   try {
     content = await packPhotos();
   } catch (err) {
-    alert("Failed to build ZIP: " + err.message);
+    alert("Falha ao criar o ZIP: " + err.message);
     return;
   } finally {
     stitchBtn.disabled = false;
@@ -341,7 +403,7 @@ stitchBtn.addEventListener("click", async () => {
 exportBtn.addEventListener("click", async () => {
   const label = exportBtn.textContent;
   exportBtn.disabled = true;
-  exportBtn.textContent = "Packing…";
+  exportBtn.textContent = "Preparando…";
   try {
     const content = await packPhotos();
     const url = URL.createObjectURL(content);
@@ -351,9 +413,9 @@ exportBtn.addEventListener("click", async () => {
     // Not revoked: Opera only reads the URL once the user confirms its download prompt,
     // and a revoked one crashed it.
     a.click();
-    exportBtn.textContent = "Downloaded!";
+    exportBtn.textContent = "Baixado!";
   } catch (err) {
-    alert("Failed to build ZIP: " + err.message);
+    alert("Falha ao criar o ZIP: " + err.message);
     exportBtn.disabled = false;
     exportBtn.textContent = label;
   }
