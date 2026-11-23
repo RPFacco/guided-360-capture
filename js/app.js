@@ -18,7 +18,8 @@ import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta,
 import { buildZip } from "./zip.js";
 import { buildPto } from "./pto.js";
 import { describeDevice } from "./device.js";
-import { stitchCapture } from "./library.js";
+import { openPreview, stitchCapture, warmViewer } from "./library.js";
+import { canPreview, renderPreview } from "./preview.js";
 import { resetVoice, startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
 const $ = (id) => document.getElementById(id);
@@ -103,6 +104,7 @@ async function begin(resume) {
     startBtn.disabled = restartBtn.disabled = false;
     return;
   }
+  warmViewer();
 
   if (gyroActive) {
     startOrientation();
@@ -382,20 +384,40 @@ async function packPhotos() {
   return buildZip(files);
 }
 
+async function packCapture() {
+  try {
+    return await packPhotos();
+  } catch (err) {
+    alert("Falha ao criar o ZIP: " + err.message);
+    return null;
+  }
+}
+
+// The phone stitches a quick preview first, so the panorama shows up in seconds
+// however long the server's queue is; the final stitch is one tap away from it.
+// Without sensor angles there is nothing to place the photos by, so the capture
+// goes straight to the server.
 stitchBtn.addEventListener("click", async () => {
+  const shots = photos.map((p) => ({ rotation: p.rotation, fov: p.fov, tilt: LEVEL_TARGETS[p.level] }));
+  if (canPreview(shots)) {
+    leaveCapture();
+    openPreview(
+      (onProgress) => renderPreview(shots, (n) => readPhoto(photos[n]), onProgress),
+      async () => {
+        const content = await packCapture();
+        if (content) stitchCapture(content);
+      },
+    );
+    return;
+  }
+
   const label = stitchBtn.textContent;
   stitchBtn.disabled = true;
   stitchBtn.textContent = "Preparando…";
-  let content;
-  try {
-    content = await packPhotos();
-  } catch (err) {
-    alert("Falha ao criar o ZIP: " + err.message);
-    return;
-  } finally {
-    stitchBtn.disabled = false;
-    stitchBtn.textContent = label;
-  }
+  const content = await packCapture();
+  stitchBtn.disabled = false;
+  stitchBtn.textContent = label;
+  if (!content) return;
   leaveCapture();
   stitchCapture(content);
 });

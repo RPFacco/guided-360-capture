@@ -8,6 +8,8 @@ const googleBtn = $("google-btn");
 const library = $("library"), libraryBackBtn = $("library-back-btn"), logoutBtn = $("logout-btn");
 const zipInput = $("zip-input"), libraryMessage = $("library-message"), list = $("panorama-list");
 const viewerBackBtn = $("viewer-back-btn"), viewerMessage = $("viewer-message"), downloadBtn = $("download-btn");
+const previewBar = $("preview-bar"), previewSendBtn = $("preview-send-btn");
+const viewerBackLabel = viewerBackBtn.textContent, previewSendLabel = previewSendBtn.textContent;
 
 const POLL_MS = 5000;
 const STATUS_LABELS = { pending: "Na fila", processing: "Costurando…", done: "Pronto", failed: "Falhou" };
@@ -16,6 +18,7 @@ let panoramas = [];
 let pollTimer = null;
 let viewer = null;
 let viewerGen = 0;
+let previewSend = null; // while the viewer shows the phone's own preview: sends that capture
 // Not revoked when the viewer closes: Opera reads a download URL only once the user
 // confirms its prompt. Same for the list's last download.
 let image = null;
@@ -263,11 +266,51 @@ async function openViewer(id) {
   }
 }
 
+// The viewer pulls Three.js from unpkg. Warming the HTTP cache while the capture runs
+// lets the phone's preview open even if the signal is gone by the time it is ready.
+// A plain fetch, not import(): a failed import can stay failed for the whole page.
+export function warmViewer() {
+  const urls = ["js/viewer.js", "js/DeviceOrientationControls.js", "https://unpkg.com/three@0.132.0/build/three.module.js"];
+  for (const url of urls) fetch(url).catch(() => {});
+}
+
+// The panorama the phone stitched by itself, before anything is sent: render(onProgress)
+// resolves to its JPEG, send() packs the capture and hands it to stitchCapture.
+export async function openPreview(render, send) {
+  const gen = ++viewerGen;
+  show("viewer");
+  previewSend = send;
+  viewerBackBtn.textContent = "← Início";
+  setViewerMessage("Montando a prévia…");
+  if (image) URL.revokeObjectURL(image.url);
+  image = null;
+  try {
+    const progress = (done) => {
+      if (gen === viewerGen) setViewerMessage(`Montando a prévia… ${Math.round(done * 100)}%`);
+    };
+    const [blob, { startViewer }] = await Promise.all([render(progress), import("./viewer.js")]);
+    if (gen !== viewerGen) return;
+    image = { url: URL.createObjectURL(blob), name: "panorama_previa.jpg" };
+    downloadBtn.classList.remove("hidden");
+    previewBar.classList.remove("hidden");
+    const started = await startViewer(image.url, setViewerMessage);
+    if (gen !== viewerGen) return started.stop();
+    viewer = started;
+  } catch (_) {
+    if (gen !== viewerGen) return;
+    previewBar.classList.remove("hidden");
+    setViewerMessage("Não foi possível montar a prévia, mas dá para enviar para a versão final.");
+  }
+}
+
 function closeViewer() {
   viewerGen++;
   viewer?.stop();
   viewer = null;
   downloadBtn.classList.add("hidden");
+  previewSend = null;
+  previewBar.classList.add("hidden");
+  viewerBackBtn.textContent = viewerBackLabel;
 }
 
 zipInput.addEventListener("change", () => {
@@ -290,7 +333,7 @@ async function upload(file) {
   const lock = await keepScreenOn();
   try {
     const status = await apiUpload(file, progress);
-    if (status === 201) setMessage("Enviado. Já pode fechar o app: a costura leva cerca de 6 minutos.");
+    if (status === 201) setMessage("Enviado. Já pode fechar o app: a versão final aparece aqui quando ficar pronta, o que pode demorar se tiver muita gente na fila.");
     else if (status === 400) setMessage("Esse arquivo não é um .zip de captura.");
     else if (status === 413) setMessage("O arquivo passa de 300 MB.");
     else setMessage(`Falha no envio (${status}).`);
@@ -309,7 +352,18 @@ loginBackBtn.addEventListener("click", () => {
   show("intro");
 });
 libraryBackBtn.addEventListener("click", () => show("intro"));
-viewerBackBtn.addEventListener("click", openLibrary);
+viewerBackBtn.addEventListener("click", () => (previewSend ? show("intro") : openLibrary()));
+previewSendBtn.addEventListener("click", async () => {
+  if (!previewSend || previewSendBtn.disabled) return;
+  previewSendBtn.disabled = true;
+  previewSendBtn.textContent = "Preparando…";
+  try {
+    await previewSend();
+  } finally {
+    previewSendBtn.disabled = false;
+    previewSendBtn.textContent = previewSendLabel;
+  }
+});
 downloadBtn.addEventListener("click", () => saveFile(image.url, image.name));
 registerBtn.addEventListener("click", register);
 loginForm.addEventListener("submit", (e) => {
