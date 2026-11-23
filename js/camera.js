@@ -1,4 +1,6 @@
-import { exifFromBlob, fovFromFocal, assumedFov } from "./fov.js";
+import { exifFromBlob, fovFromFocal, fovFromShortEdge, assumedFov, ASSUMED_HFOV } from "./fov.js";
+import { DEG } from "./orientation.js";
+import { acutance, ANALYSIS_EDGE } from "./sharpness.js";
 
 // takePhoto reconfigures the capture session on every shot: on iOS the preview goes
 // black and each still allocates a sensor-sized buffer that kills the tab after a
@@ -31,10 +33,12 @@ export const hasVFC = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
 export let frameSeq = 0;
 export let previewLabel = "…";
 export let exposureLabel = "automática";
+export let wbLabel = "automático";
 export let shotW = 0, shotH = 0;
 export let shotFov = null;
 let probedFov = null;
 let probePromise = null;
+let lensProbe = true; // false in the video probe: a takePhoto would disrupt the recording track
 
 export function onFrame(listener) {
   frameListener = listener;
@@ -65,26 +69,45 @@ export function stopCamera() {
   stream = null;
 }
 
-export async function startCamera() {
+export async function startCamera({ forVideo = null, probeLens = true } = {}) {
   stopCamera();
+  lensProbe = probeLens;
 
   const face = { ideal: "environment" };
   let lastErr = null;
-  for (const h of shortEdgeLadder()) {
-    let candidate = null;
+  // Video probe: ask for a specific size and skip the 3:4 still check. A 16:9 track
+  // still works for the overlay, which projects with the frame's real aspect.
+  if (forVideo) {
     try {
-      candidate = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: face, height: { exact: h } }, audio: false
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: face,
+          width: { ideal: forVideo.width },
+          height: { ideal: forVideo.height },
+        },
+        audio: false,
       });
     } catch (err) {
       lastErr = err;
-      continue;
     }
-    if (isPhotoShaped(candidate.getVideoTracks()[0].getSettings())) {
-      stream = candidate;
-      break;
+  }
+  if (!stream) {
+    for (const h of shortEdgeLadder()) {
+      let candidate = null;
+      try {
+        candidate = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: face, height: { exact: h } }, audio: false
+        });
+      } catch (err) {
+        lastErr = err;
+        continue;
+      }
+      if (isPhotoShaped(candidate.getVideoTracks()[0].getSettings())) {
+        stream = candidate;
+        break;
+      }
+      candidate.getTracks().forEach((t) => t.stop());
     }
-    candidate.getTracks().forEach((t) => t.stop());
   }
   if (!stream) {
     try {
@@ -101,7 +124,7 @@ export async function startCamera() {
   await video.play().catch(() => {});
 
   startFrameLoop();
-  exposureReady = lockExposure(track).catch(() => {});
+  exposureReady = lockSettings(track).catch(() => {});
 }
 
 const lumaCanvas = document.createElement("canvas");
@@ -136,7 +159,7 @@ async function lockExposure(track) {
   if (!modes || !modes.includes("manual")) return;
 
   // The lens probe's takePhoto restarts the session, and the metering with it.
-  await probeStillFov();
+  if (lensProbe) await probeStillFov();
   await wait(EXPOSURE_SETTLE_MS);
   if (!video.videoWidth || track.readyState !== "live") return;
   const before = await steadyLuma();
@@ -155,6 +178,51 @@ async function lockExposure(track) {
     return;
   }
   exposureLabel = "travada";
+}
+
+// Exposure and white balance both have to be frozen before the first shot: a drifting
+// auto white balance shows as colour seams once the 38 photos are stitched. Let both
+// auto controls converge once, then pin exposure and lock the balance.
+async function lockSettings(track) {
+  await lockExposure(track);
+  await lockWhiteBalance(track);
+}
+
+async function lockWhiteBalance(track) {
+  wbLabel = "automático";
+  if (IS_IOS || !track.getCapabilities) return;
+  const caps = track.getCapabilities();
+  const modes = caps.whiteBalanceMode;
+  if (!modes) return;
+
+  // Let the auto balance settle before freezing it; the exposure lock often already
+  // provided this window, and the extra wait is harmless.
+  await wait(EXPOSURE_SETTLE_MS);
+
+  // single-shot runs the algorithm once and then holds: exactly what a set needs.
+  if (modes.includes("single-shot")) {
+    try {
+      await track.applyConstraints({ advanced: [{ whiteBalanceMode: "single-shot" }] });
+      wbLabel = "travado";
+      return;
+    } catch (_) {}
+  }
+
+  // Otherwise pin the temperature the camera converged to. Some devices only report it
+  // once manual is engaged, so ask for manual, read it back, then apply it explicitly.
+  if (modes.includes("manual") && caps.colorTemperature) {
+    try {
+      await track.applyConstraints({ advanced: [{ whiteBalanceMode: "manual" }] });
+      await wait(120);
+      const { colorTemperature } = track.getSettings();
+      if (colorTemperature) {
+        await track.applyConstraints({ advanced: [{ whiteBalanceMode: "manual", colorTemperature }] });
+        wbLabel = "travado";
+        return;
+      }
+      await track.applyConstraints({ advanced: [{ whiteBalanceMode: "continuous" }] }).catch(() => {});
+    } catch (_) {}
+  }
 }
 
 // Re-attaching srcObject cancels any pending requestVideoFrameCallback, so the loop
@@ -224,6 +292,29 @@ async function setShotFov(blob) {
   shotFov = { ...base, width: w, height: h, orientation };
 }
 
+// A resumed run already knows the lens from the shots it saved.
+export function adoptFov(fov) {
+  if (fov) shotFov = fov;
+}
+
+// The overlay is drawn on the preview, so it has to project with the preview's own
+// geometry. This is the focal length in CSS px for a preview shown object-fit: cover
+// into a boxW x boxH box: cover magnifies the frame by max(box/frame), and the focal
+// scales with it. Focal comes from the throwaway still's EXIF (the probe covers the
+// gap before the first shot); until it reports we assume a typical phone lens.
+// Using the frame's real aspect also keeps it right if a driver hands back a
+// non-3:4 track, which cover then crops to the box.
+export function previewFocalPx(boxW, boxH) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  if (!vw || !vh) return (boxW / 2) / Math.tan(ASSUMED_HFOV * DEG / 2);
+  const f35 = (shotFov && shotFov.focal35mm) || (probedFov && probedFov.focal35mm) || null;
+  const hfov = f35
+      ? fovFromFocal(f35, vw, vh).horizontal
+      : fovFromShortEdge(ASSUMED_HFOV, vw, vh).horizontal;
+  const scale = Math.max(boxW / vw, boxH / vh); // object-fit: cover, centred
+  return scale * (vw / 2) / Math.tan(hfov * DEG / 2);
+}
+
 // Canvas grabs have no EXIF, so take a single throwaway still up front just to read
 // the lens. It reconfigures the capture session once, which the canvas path can survive;
 // the per-shot takePhoto is what kills the tab on iOS. Best effort, never blocks the run.
@@ -252,6 +343,26 @@ export function probeStillFov() {
 // One reused canvas. Resize only when the frame size changes (realloc leaks on iOS).
 const canvas = document.createElement("canvas");
 const ctx = canvas.getContext("2d");
+
+// Focus check: a downscaled readback, so the metric never touches a full still. The
+// canvas is resized only when the aspect changes, same reason as above.
+const focusCanvas = document.createElement("canvas");
+const focusCtx = focusCanvas.getContext("2d", { willReadFrequently: true });
+
+function focusOf(source, sw, sh) {
+  if (!sw || !sh) return null;
+  const scale = ANALYSIS_EDGE / Math.min(sw, sh);
+  const w = Math.max(3, Math.round(sw * scale));
+  const h = Math.max(3, Math.round(sh * scale));
+  if (focusCanvas.width !== w) focusCanvas.width = w;
+  if (focusCanvas.height !== h) focusCanvas.height = h;
+  try {
+    focusCtx.drawImage(source, 0, 0, w, h);
+    return acutance(focusCtx.getImageData(0, 0, w, h).data, w, h);
+  } catch (_) {
+    return null;
+  }
+}
 
 // exposed() runs once the picture is fixed: from then on the phone may move.
 export async function capturePhoto(exposed) {
@@ -287,8 +398,9 @@ export async function capturePhoto(exposed) {
   shotW = w;
   shotH = h;
 
+  const sharpness = focusOf(canvas, w, h);
   const blob = await new Promise((res) => canvas.toBlob(res, "image/jpeg", JPEG_QUALITY));
   await setShotFov(blob);
   await recoverPreview();
-  return blob;
+  return { blob, sharpness };
 }

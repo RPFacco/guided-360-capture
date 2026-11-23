@@ -1,6 +1,6 @@
 import { LEVEL_TARGETS, LEVEL_SHOTS, TOTAL_SHOTS, shotsBefore, currentLevel, currentShot, photos, yawStep, headingLost } from "./session.js";
 import { gyroActive } from "./orientation.js";
-import { hasVFC, frameSeq, previewLabel, exposureLabel, shotW, shotH } from "./camera.js";
+import { hasVFC, frameSeq, previewLabel, exposureLabel, wbLabel, shotW, shotH } from "./camera.js";
 import { drawDomeBase } from "./dome.js";
 import { say } from "./voice.js";
 
@@ -17,11 +17,16 @@ const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitc
 const perf = $("perf");
 
 export let tiltAligned = false;
-let shotLabel = "—", fpsText = "…";
+let shotLabel = "—", fpsText = "…", sharpLabel = "—";
 let uiFrames = 0, fpsAt = 0, fpsSeq = 0;
 
 export function updatePerf() {
-  perf.textContent = "FPS " + fpsText + " · Prévia " + previewLabel + " · Foto " + shotLabel + " · Exposição " + exposureLabel;
+  perf.textContent = "FPS " + fpsText + " · Prévia " + previewLabel + " · Foto " + shotLabel + " · Exposição " + exposureLabel + " · WB " + wbLabel + " · Nitidez " + sharpLabel;
+}
+
+export function showSharpness(s) {
+  sharpLabel = s && Number.isFinite(s.score) ? s.score.toFixed(2) : "—";
+  updatePerf();
 }
 
 function fmtSize(bytes) {
@@ -46,7 +51,7 @@ export function countFrame(now) {
 
 function hint(name) {
   say(name);
-  repeatBtn.classList.toggle("hidden", name === null);
+  repeatBtn?.classList.toggle("hidden", name === null);
 }
 
 export function setPrompt(text, name) {

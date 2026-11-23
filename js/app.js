@@ -1,5 +1,6 @@
 import {
-  TOTAL_SHOTS, LEVEL_TARGETS, LEVEL_SHOTS, photos, headingLost, isDone, resetSession, restoreSession,
+  TOTAL_SHOTS, LEVEL_TARGETS, LEVEL_SHOTS, photos, currentLevel, currentShot,
+  headingLost, isDone, resetSession, restoreSession,
   anchorHeading, loseHeading, recalibrate, shotFailed, shotTaken, undoShot,
 } from "./session.js";
 import {
@@ -7,13 +8,16 @@ import {
   requestGyro, startOrientation, stopOrientation, smoothOrientation, forgetHeading,
   captureRotation, rawRotation, rotationAngle,
 } from "./orientation.js";
-import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov } from "./camera.js";
-import { updateTilt, updateHUD, updatePerf, countFrame, showShot, setPrompt } from "./hud.js";
+import { hasVFC, onFrame, startCamera, stopCamera, capturePhoto, resumePreview, probeStillFov, shotFov, adoptFov } from "./camera.js";
+import { isBlurry } from "./sharpness.js";
+import { updateTilt, updateHUD, updatePerf, countFrame, showShot, showSharpness, setPrompt } from "./hud.js";
 import { initDome, drawDome } from "./dome.js";
 import { initTargets, drawTargets } from "./targets.js";
 import { holdProgress, updateAutoShot, STILL_DEG } from "./autoshot.js";
 import { openStorage, savePhoto, deletePhoto, clearStorage, readPhoto, readMeta, photoKey } from "./storage.js";
 import { buildZip } from "./zip.js";
+import { buildPto } from "./pto.js";
+import { describeDevice } from "./device.js";
 import { stitchCapture } from "./library.js";
 import { resetVoice, startVoice, stopVoice, resumeVoice, repeatVoice, toggleVoice, voiceMuted } from "./voice.js";
 
@@ -23,7 +27,7 @@ const startBtn = $("start-btn"), restartBtn = $("restart-btn"), errorEl = $("err
 const undoBtn = $("undo-btn"), exportBtn = $("export-btn"), stitchBtn = $("stitch-btn");
 const repeatBtn = $("repeat-btn"), voiceBtn = $("voice-btn");
 const volumeDialog = $("volume-dialog"), volumeOk = $("volume-ok");
-const flash = $("flash"), holding = $("holding");
+const flash = $("flash"), holding = $("holding"), blurToast = $("blur-toast");
 const exportLabel = exportBtn.textContent;
 const HOLDING_DELAY_MS = 150; // quicker captures (iOS) never show the hold notice
 
@@ -32,6 +36,10 @@ let busy = false;
 let storedCount = 0; // photos an earlier page left behind, from shot 1 with no gaps
 let restartArmed = false;
 let wakeLock = null;
+const rejectedShots = []; // blur rejections, logged to metadata without the image
+let retryAfter = 0;       // pause auto-shot after a rejection so the toast cannot spam
+let rejectStreak = 0;     // consecutive rejects at this slot; see the cap in shoot()
+let blurTimer = null;
 let waiting = false; // the camera is open, the volume notice not yet answered
 let shotStart = null; // rotation at the shutter, until the picture is fixed
 let shotDrift = 0;    // furthest the phone got from it meanwhile, degrees
@@ -67,11 +75,20 @@ async function begin(resume) {
 
   await dbReady;
   resetSession();
+  rejectedShots.length = 0;
+  retryAfter = 0;
+  rejectStreak = 0;
+  hideBlur();
   if (resume && storedCount) {
     restoreSession(storedCount);
     for (const p of photos) {
       const m = await readMeta(p);
-      if (m) { p.rotation = m.rotation; p.fov = m.fov; p.target = m.target; }
+      if (m) {
+        p.rotation = m.rotation; p.fov = m.fov; p.target = m.target;
+        p.sharpness = m.sharpness || null;
+        p.blurry = !!m.blurry;
+        adoptFov(m.fov);
+      }
     }
   } else {
     await clearStorage();
@@ -143,6 +160,7 @@ function leaveCapture() {
   running = false;
   stopOrientation();
   stopCamera();
+  hideBlur();
   stopVoice();
   wakeLock?.release().catch(() => {});
   wakeLock = null;
@@ -192,7 +210,7 @@ function renderLoop(now) {
   if (gyroActive && rawPitch !== null) updateTilt(displayPitch);
   if (gyroActive && rawYaw !== null) anchorHeading(displayYaw);
   if (shotStart && rawRotation) shotDrift = Math.max(shotDrift, rotationAngle(shotStart, rawRotation));
-  if (updateAutoShot(now, busy || waiting)) shoot();
+  if (updateAutoShot(now, busy || waiting) && now >= retryAfter) shoot();
   drawDome();
   if (!hasVFC) drawTargets(holdProgress);
   countFrame(now);
@@ -201,6 +219,7 @@ function renderLoop(now) {
 
 undoBtn.addEventListener("click", () => {
   if (busy) return;
+  rejectStreak = 0;
 
   // Recalibration: aimed back at the last photo, so no photo is taken.
   if (headingLost() && gyroActive && rawYaw !== null) {
@@ -217,8 +236,25 @@ undoBtn.addEventListener("click", () => {
   updateHUD();
 });
 
-// Android's takePhoto freezes the preview for up to a second. The flash waits for the
-// picture, and until then the screen says to hold still: moving in between spoils it.
+const round4 = (v) => Math.round(v * 10000) / 10000;
+
+function warnBlur() {
+  blurToast.textContent = "Fora de foco - tire de novo";
+  blurToast.classList.add("show");
+  undoBtn.classList.add("alert");
+  clearTimeout(blurTimer);
+  blurTimer = setTimeout(hideBlur, 4000);
+}
+
+function hideBlur() {
+  clearTimeout(blurTimer);
+  blurTimer = null;
+  blurToast.classList.remove("show");
+  undoBtn.classList.remove("alert");
+}
+
+// The flash waits for the picture, and until then the screen says to hold still:
+// moving in between spoils it.
 async function shoot() {
   busy = true;
   const rotation = captureRotation(); // the capture can take a second, and the phone moves on
@@ -243,23 +279,57 @@ async function shoot() {
   };
 
   undoBtn.disabled = true;
-  let blob = null;
+  let shot = null;
   try {
-    blob = await capturePhoto(exposed);
+    shot = await capturePhoto(exposed);
   } catch (_) {}
   settle();
   undoBtn.disabled = !photos.length;
   busy = false;
 
-  if (!blob || moved) {
+  if (!shot || !shot.blob || moved) {
     shotFailed();
     setPrompt(moved ? "O celular mexeu - segure parado para tentar de novo." : "A foto falhou - segure parado para tentar de novo.", "falhou");
     return;
   }
 
+  const { blob, sharpness } = shot;
+  showSharpness(sharpness);
+
+  if (isBlurry(sharpness, null)) {
+    rejectedShots.push({
+      level: currentLevel + 1,
+      shot: currentShot + 1,
+      score: sharpness ? round4(sharpness.score) : null,
+      contrast: sharpness ? round4(sharpness.contrast) : null,
+    });
+    shotFailed();                        // a dropped shot, not a taken one
+    rejectStreak++;
+
+    // The metric cannot judge every surface, so never trap the run: after three
+    // rejections at the same slot keep the shot, flagged in the metadata.
+    if (rejectStreak >= 3) {
+      hideBlur();
+      rejectStreak = 0;
+      showShot(blob.size);
+      savePhoto(shotTaken(blob, rotation, shotFov, sharpness, true));
+      updateHUD();
+      setPrompt("Salva mesmo assim - foco incerto.", null);
+      return;
+    }
+
+    warnBlur();
+    retryAfter = performance.now() + 1500;
+    updateHUD();
+    setPrompt("Fora de foco - tire de novo.", "falhou");
+    return;
+  }
+
+  rejectStreak = 0;
+  hideBlur();
   // Size from the blob directly - no createImageBitmap (that bitmap leaked memory on iOS).
   showShot(blob.size);
-  savePhoto(shotTaken(blob, rotation, shotFov));
+  savePhoto(shotTaken(blob, rotation, shotFov, sharpness));
   updateHUD();
 }
 
@@ -283,12 +353,15 @@ async function packPhotos() {
       fov: p.fov || null,
       rotation: p.rotation || null,
       target: p.target || null,
+      sharpness: p.sharpness || null,
+      blurry: !!p.blurry,
     });
   }
 
   const doc = {
     format: "guided-360-capture/v1",
     generated: new Date().toISOString(),
+    device: await describeDevice(),
     shotLayout: { tiltDegrees: LEVEL_TARGETS, shotsPerLevel: LEVEL_SHOTS },
     fovSource: fovSources.size === 1 ? [...fovSources][0] : "mixed",
     conventions: {
@@ -298,7 +371,13 @@ async function packPhotos() {
     },
     photos: entries,
   };
+  if (rejectedShots.length) doc.rejected = rejectedShots;
   files.push({ name: "metadata.json", blob: new Blob([JSON.stringify(doc, null, 2)], { type: "application/json" }) });
+  try {
+    files.push({ name: "pano.pto", blob: new Blob([buildPto(doc)], { type: "text/plain" }) });
+  } catch (err) {
+    console.warn("Skipping pano.pto:", err.message);
+  }
 
   return buildZip(files);
 }

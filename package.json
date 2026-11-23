@@ -1,0 +1,9 @@
+{
+  "name": "guided-360-capture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "pto": "node tools/zip-to-pto.mjs",
+    "frames": "node tools/video-to-frames.mjs"
+  }
+}
