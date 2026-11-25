@@ -30,7 +30,7 @@ export function postJson(path, data) {
   });
 }
 
-const PART_BYTES = 5 * 1024 * 1024;
+const PART_BYTES = 2 * 1024 * 1024;
 const PARALLEL_PARTS = 3;
 const PART_TRIES = 4;
 const RETRY_STATUS = [502, 503, 504, 520, 522, 524];
