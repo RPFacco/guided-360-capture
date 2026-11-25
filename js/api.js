@@ -30,9 +30,12 @@ export function postJson(path, data) {
   });
 }
 
-const PART_BYTES = 10 * 1024 * 1024;
+const PART_BYTES = 5 * 1024 * 1024;
 const PARALLEL_PARTS = 3;
-const PART_TRIES = 3;
+const PART_TRIES = 4;
+const RETRY_STATUS = [502, 503, 504, 520, 522, 524];
+
+const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
 function putPart(url, token, blob, onProgress) {
   return new Promise((resolve, reject) => {
@@ -64,16 +67,26 @@ export async function apiUpload(file, onProgress) {
         onProgress(sent.reduce((a, b) => a + b, 0) / file.size);
       };
       for (let tries = 1; ; tries++) {
+        let status;
         try {
-          const status = await putPart(API_URL + `${path}/parts/${i}`, token, blob, progress);
-          if (status !== 204) failed = status;
-          break;
+          status = await putPart(API_URL + `${path}/parts/${i}`, token, blob, progress);
         } catch (err) {
           if (failed) return;
-          if (tries < PART_TRIES) continue;
+          if (tries < PART_TRIES) {
+            progress(0);
+            await wait(2000 * tries);
+            continue;
+          }
           failed = -1;
           throw err;
         }
+        if (RETRY_STATUS.includes(status) && tries < PART_TRIES && !failed) {
+          progress(0);
+          await wait(2000 * tries);
+          continue;
+        }
+        if (status !== 204) failed = status;
+        break;
       }
     }
   }
