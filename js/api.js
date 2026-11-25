@@ -37,7 +37,7 @@ const RETRY_STATUS = [502, 503, 504, 520, 522, 524];
 
 const wait = (ms) => new Promise((res) => setTimeout(res, ms));
 
-function putPart(url, token, blob, onProgress) {
+function putPart(url, token, body, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("PUT", url);
@@ -45,7 +45,7 @@ function putPart(url, token, blob, onProgress) {
     xhr.upload.onprogress = (e) => onProgress(e.loaded);
     xhr.onload = () => resolve(xhr.status);
     xhr.onerror = () => reject(new Error("Network error"));
-    xhr.send(blob);
+    xhr.send(body);
   });
 }
 
@@ -61,7 +61,7 @@ export async function apiUpload(file, onProgress) {
   async function sendParts() {
     while (next < count && !failed) {
       const i = next++;
-      const blob = file.slice(i * PART_BYTES, (i + 1) * PART_BYTES);
+      const part = new Uint8Array(await file.slice(i * PART_BYTES, (i + 1) * PART_BYTES).arrayBuffer());
       const progress = (loaded) => {
         sent[i] = loaded;
         onProgress(sent.reduce((a, b) => a + b, 0) / file.size);
@@ -69,7 +69,7 @@ export async function apiUpload(file, onProgress) {
       for (let tries = 1; ; tries++) {
         let status;
         try {
-          status = await putPart(API_URL + `${path}/parts/${i}`, token, blob, progress);
+          status = await putPart(API_URL + `${path}/parts/${i}`, token, part, progress);
         } catch (err) {
           if (failed) return;
           if (tries < PART_TRIES) {
