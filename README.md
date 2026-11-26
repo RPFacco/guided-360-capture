@@ -75,6 +75,11 @@ O `metadata.json` também leva um bloco `device` no nível da captura (user agen
 plataforma, modelo quando o navegador expõe e o tamanho da tela), para separar amostras de
 celulares diferentes depois.
 
+O envio para o servidor manda o zip em partes de 2 MB, 3 por vez, e repete a que falhar.
+Cada parte tem ~100 s para chegar, o que cobre uploads a partir de ~750 kbit/s. As partes
+vão como bytes, e não como pedaço do arquivo, porque o WebKit mandava o começo do arquivo
+no lugar.
+
 ## Projeto Hugin
 
 O `pano.pto` é montado a partir do `metadata.json` para o Hugin começar da pose medida em
