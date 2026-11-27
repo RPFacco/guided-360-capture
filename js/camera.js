@@ -11,7 +11,7 @@ const IS_IOS = /iP(hone|od|ad)/.test(navigator.userAgent) ||
 
 const JPEG_QUALITY = 0.92;
 const SHOT_AR = 3 / 4;  // width/height, in portrait
-const LONG_EDGE = 4032; // the photo is the whole preview frame, up to 12MP
+const LONG_EDGE = 1920; // the stitch shrinks every photo to 1440x1920 anyway
 
 // Measured on a Xiaomi (Android 16): the still menu holds 2448x3264, 1920x2560 and
 // 1440x1920 at a true 3:4, plus a 2256x4000 16:9 that is the DEFAULT and crops 25%
@@ -393,6 +393,7 @@ export async function capturePhoto(exposed) {
 
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
+  ctx.imageSmoothingQuality = "high";
   ctx.drawImage(video, sx, sy, sw, sh, 0, 0, w, h);
   exposed();
   shotW = w;
