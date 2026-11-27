@@ -51,10 +51,10 @@ export function onFrame(listener) {
 // applyConstraints can lower a resolution but never raise it, so each rung is a fresh
 // getUserMedia.
 //
-// The photo IS a preview frame, so iOS takes the biggest, down from 12MP. Android
-// starts at 1440: the stitch shrinks every photo to 1440x1920 anyway.
+// The photo IS a preview frame, and the stitch shrinks every photo to 1440x1920
+// anyway, so both start at 1440.
 function shortEdgeLadder() {
-  return IS_IOS ? [3024, 2448, 1920, 1440, 1080] : [1440, 1920, 1080];
+  return IS_IOS ? [1440, 1920, 2448, 3024, 1080] : [1440, 1920, 1080];
 }
 
 // A track can answer the right size with the wrong shape - {height: exact 720} came

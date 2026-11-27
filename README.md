@@ -35,7 +35,7 @@ Um caminho, com o tamanho da prévia escolhido por plataforma:
 | Plataforma | Prévia | Foto |
 |---|---|---|
 | Android / desktop | 1440 no lado menor (a costura reduz toda foto a 1440×1920) | captura do quadro da prévia num canvas |
-| iOS | até 3024×4032 | captura do quadro da prévia num canvas |
+| iOS | 1440 no lado menor, como no Android | captura do quadro da prévia num canvas |
 
 O `takePhoto()` reconfigura a sessão de captura a cada foto: no iOS a prévia fica preta e
 cada foto aloca um buffer do tamanho do sensor, o que derruba a aba depois de algumas fotos;
